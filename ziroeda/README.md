@@ -100,8 +100,9 @@ pnpm -C packages/core typecheck
 2. **Typed document model** — symbols, pins, wires, labels, junctions. ✅
 3. **Read-only viewer** — render a real `.kicad_sch` faithfully on a canvas. ✅
 4. **Selection + move + command bus** — click/box hit-testing, undo/redo. ✅
-5. **Place + wire** — symbol placement from a library; wiring with junctions. ← _next_
-6. **Save** — byte-faithful write-back, verified against KiCad's own output.
+5. **Draw wire + delete** — wire tool with junction auto-creation; add/delete commands. ✅
+6. **Place symbol** — symbol placement from a library. ← _next_
+7. **Save** — byte-faithful write-back, verified against KiCad's own output.
 
 Connectivity (the net-building "connection graph"), ERC, netlist export, and the
 other tools (pcbnew, gerbview, …) follow once the schematic editor is solid.

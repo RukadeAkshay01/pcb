@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { parse, readSchematic, iuToMM, moveWithConnections, History, type Schematic, type LibSymbol, type MoveSpec, type Vec2 } from '@ziroeda/core';
-import { SchematicCanvas, type CanvasController } from './components/SchematicCanvas.js';
+import { parse, readSchematic, iuToMM, moveWithConnections, deleteByIds, History, type Schematic, type LibSymbol, type MoveSpec, type EditCommand, type Vec2 } from '@ziroeda/core';
+import { SchematicCanvas, type CanvasController, type LineMode } from './components/SchematicCanvas.js';
 import { Toolbar } from './ui/Toolbar.js';
 import { TOP_TOOLBAR, LEFT_TOOLBAR, RIGHT_TOOLBAR, MENUS } from './ui/toolbars.js';
 import './ui/shell.css';
@@ -52,12 +52,18 @@ export function App(): JSX.Element {
     });
   }, []);
 
+  const runCommand = useCallback((cmd: EditCommand) => {
+    setDoc((d) => (d ? history.current.execute(d, cmd) : d));
+  }, []);
+
   const onMove = useCallback((spec: MoveSpec, delta: Vec2) => {
     setDoc((d) => (d ? history.current.execute(d, moveWithConnections(spec, delta)) : d));
   }, []);
 
   const undo = useCallback(() => setDoc((d) => (d ? history.current.undo(d) ?? d : d)), []);
   const redo = useCallback(() => setDoc((d) => (d ? history.current.redo(d) ?? d : d)), []);
+
+  const lineMode: LineMode = toggles.has('lineModeFree') ? 'free' : toggles.has('lineMode45') ? '45' : '90';
 
   const onTopAction = useCallback((id: string) => {
     if (id === 'zoomFit' || id === 'zoomFitObjects') controller.current?.zoomToFit();
@@ -88,11 +94,15 @@ export function App(): JSX.Element {
         redo();
       } else if (e.key === 'Escape') {
         setSelection(new Set());
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selection.size > 0) {
+        e.preventDefault();
+        runCommand(deleteByIds(selection));
+        setSelection(new Set());
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo]);
+  }, [undo, redo, selection, runCommand]);
 
   const units = toggles.has('unitsInches') ? 'in' : toggles.has('unitsMils') ? 'mils' : 'mm';
   const fmt = (iu: number): string => {
@@ -132,8 +142,11 @@ export function App(): JSX.Element {
             schematic={doc}
             libById={libById}
             selection={selection}
+            activeTool={activeTool}
+            lineMode={lineMode}
             onSelect={onSelect}
             onMove={onMove}
+            onCommand={runCommand}
             onCursorMove={setCursor}
             onScaleChange={setScale}
           />
@@ -162,7 +175,15 @@ export function App(): JSX.Element {
         <span className="cell">grid {units === 'mm' ? '1.2700' : units === 'mils' ? '50.00' : '0.0500'} {units}</span>
         <span className="cell">{units}</span>
         <span className="cell">Z {Number.isFinite(zoomPct) ? zoomPct : 100}%</span>
-        <span className="cell grow">{selection.size > 0 ? `${selection.size} selected — drag to move, Ctrl+Z to undo` : 'click to select · drag to move · scroll to zoom'}</span>
+        <span className="cell grow">
+          {activeTool === 'drawWire'
+            ? 'Draw wire — click to add segments, double-click or Esc to finish'
+            : activeTool === 'delete'
+              ? 'Delete tool — click an item to delete it'
+              : selection.size > 0
+                ? `${selection.size} selected — drag to move, Del to delete, Ctrl+Z to undo`
+                : 'click to select · drag to move · scroll to zoom'}
+        </span>
       </div>
     </div>
   );

@@ -28,6 +28,7 @@ export {
   type BBox,
   type EditCommand,
   type MoveSpec,
+  type ItemsBatch,
   History,
   hitTest,
   refId,
@@ -36,6 +37,11 @@ export {
   planMove,
   moveItems,
   moveWithConnections,
+  addItems,
+  deleteByIds,
+  needsJunction,
+  makeWire,
+  makeJunction,
 } from './edit/index.js';
 
 export { SCH_IU_PER_MM, mmToIU, iuToMM } from './units.js';
