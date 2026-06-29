@@ -1,6 +1,10 @@
 import type { JSX } from 'react';
 import './ui/shell.css';
 
+// KiCad's own dark-theme launcher icons (GPL), vendored under assets/launcher.
+const ICONS = import.meta.glob('./assets/launcher/*.svg', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
+const iconUrl = (id: string): string | undefined => ICONS[`./assets/launcher/${id}.svg`];
+
 /**
  * KiCad project-manager-style home page (the launcher window KiCad opens with).
  * Tile titles and descriptions are taken verbatim from KiCad's
@@ -28,19 +32,8 @@ const TILES: Tile[] = [
 ];
 
 const tileIcon = (id: string): JSX.Element => {
-  const common = { width: 34, height: 34, viewBox: '0 0 32 32', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  switch (id) {
-    case 'schematic': return <svg {...common}><rect x="11" y="9" width="10" height="14" /><path d="M5 12h6 M5 20h6 M21 16h6" /></svg>;
-    case 'symbols': return <svg {...common}><rect x="6" y="7" width="20" height="18" /><path d="M11 16h4 M18 12v8" /></svg>;
-    case 'pcb': return <svg {...common}><rect x="6" y="6" width="20" height="20" rx="1" /><circle cx="11" cy="11" r="1.5" /><circle cx="21" cy="21" r="1.5" /><path d="M11 11h6v6 M17 17h4" /></svg>;
-    case 'footprints': return <svg {...common}><rect x="8" y="8" width="16" height="16" /><path d="M12 8v16 M20 8v16" /></svg>;
-    case 'gerber': return <svg {...common}><path d="M16 5l11 6v10l-11 6L5 21V11z" /><path d="M16 16l11-5 M16 16v11 M16 16L5 11" /></svg>;
-    case 'image': return <svg {...common}><rect x="6" y="7" width="20" height="18" /><circle cx="12" cy="13" r="2" /><path d="M6 22l6-5 5 4 5-6 4 5" /></svg>;
-    case 'calculator': return <svg {...common}><rect x="8" y="5" width="16" height="22" rx="1" /><path d="M11 9h10 M11 14h2 M15 14h2 M19 14h2 M11 18h2 M15 18h2 M19 18h2 M11 22h2 M15 22h2 M19 22h2" /></svg>;
-    case 'drawingsheet': return <svg {...common}><rect x="6" y="5" width="20" height="22" /><path d="M9 8h14 M9 23h8 M17 19h6 M17 23h6 M17 19v8" /></svg>;
-    case 'pcm': return <svg {...common}><path d="M16 4l11 6v12l-11 6-11-6V10z" /><path d="M16 16l11-6 M16 16v12 M16 16L5 10" /></svg>;
-    default: return <svg {...common}><rect x="7" y="7" width="18" height="18" /></svg>;
-  }
+  const url = iconUrl(id);
+  return url ? <img src={url} alt="" /> : <span style={{ width: 44, height: 44 }} />;
 };
 
 export function HomePage({ projectName, onOpenSchematic }: { projectName: string; onOpenSchematic: () => void }): JSX.Element {
