@@ -1,8 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import {
   hitTest, planMove, moveWithConnections, orthoMove, addItems, deleteByIds, placeSymbol,
-  makeWire, makeJunction, needsJunction, rotateOrientation, mirrorOrientation, transformItems,
-  type MoveSpec, type EditCommand, type Schematic, type LibSymbol, type Vec2, type Orientation, type TransformOp,
+  makeWire, makeBus, makeJunction, makeLabel, needsJunction, rotateOrientation, mirrorOrientation, transformItems,
+  type MoveSpec, type EditCommand, type Schematic, type LibSymbol, type Vec2, type Orientation, type TransformOp, type LabelKind,
 } from '@ziroeda/core';
 import { renderSchematic, fitToContent, type Viewport } from '../render/renderer.js';
 import { KICAD_CLASSIC } from '../theme.js';
@@ -11,6 +11,14 @@ const GRID = 12700; // 1.27 mm (50 mil)
 const snap = (p: Vec2): Vec2 => ({ x: Math.round(p.x / GRID) * GRID, y: Math.round(p.y / GRID) * GRID });
 
 export type LineMode = 'free' | '90' | '45';
+
+/** Right-toolbar tool ids that place a text label, mapped to the label kind. */
+const LABEL_TOOLS: Record<string, LabelKind> = {
+  placeLabel: 'label',
+  placeGlobalLabel: 'global_label',
+  placeHierLabel: 'hierarchical_label',
+  placeText: 'text',
+};
 
 /** Constrain `pt` relative to `anchor` per the active line-posture mode. */
 function constrain(anchor: Vec2, pt: Vec2, mode: LineMode): Vec2 {
@@ -69,6 +77,9 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
   const cursorRef = useRef<Vec2 | null>(null);
   // Orientation applied to the symbol currently being placed (R/X/Y before dropping).
   const placeOrientRef = useRef<Orientation>({ angle: 0 });
+  // In-progress label placement: where it will go and the on-screen input position.
+  const [labelDraft, setLabelDraft] = useState<{ at: Vec2; kind: LabelKind; screen: { x: number; y: number } } | null>(null);
+  const labelInputRef = useRef<HTMLInputElement>(null);
 
   const dpr = () => window.devicePixelRatio || 1;
 
@@ -91,20 +102,20 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     let doc = schematic;
     if (modeRef.current === 'move' && md && spec) {
       doc = buildMove(spec, md).apply(schematic);
-    } else if (activeTool === 'placeSymbol' && placeLib && cursorRef.current) {
+    } else if ((activeTool === 'placeSymbol' || activeTool === 'placePower') && placeLib && cursorRef.current) {
       // Ghost: show the symbol attached to the cursor (with its current orientation).
       doc = placeSymbol(placeLib, snap(cursorRef.current), placeOrientRef.current).apply(schematic);
     }
     renderSchematic(ctx, doc, vp, KICAD_CLASSIC, canvas.width, canvas.height, selection);
 
-    // Wire preview segment.
+    // Wire / bus preview segment.
     const anchor = wireAnchorRef.current;
     const cur = cursorRef.current;
-    if (activeTool === 'drawWire' && anchor && cur) {
+    if ((activeTool === 'drawWire' || activeTool === 'drawBus') && anchor && cur) {
       const end = constrain(anchor, snap(cur), lineMode);
       ctx.setTransform(vp.scale, 0, 0, vp.scale, vp.offsetX, vp.offsetY);
-      ctx.strokeStyle = KICAD_CLASSIC.wire;
-      ctx.lineWidth = 0.1524 * GRID / 1.27; // ~6 mil
+      ctx.strokeStyle = activeTool === 'drawBus' ? KICAD_CLASSIC.bus : KICAD_CLASSIC.wire;
+      ctx.lineWidth = (activeTool === 'drawBus' ? 0.3048 : 0.1524) * GRID / 1.27; // bus ~12 mil, wire ~6 mil
       ctx.beginPath();
       ctx.moveTo(anchor.x, anchor.y);
       ctx.lineTo(end.x, end.y);
@@ -171,13 +182,14 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     zoomAbout((e.clientX - rect.left) * dpr(), (e.clientY - rect.top) * dpr(), Math.exp(-e.deltaY * 0.001));
   }, [zoomAbout]);
 
-  const commitWireSegment = useCallback((anchor: Vec2, end: Vec2) => {
-    const wire = makeWire(anchor, end);
-    const withWire = addItems({ lines: [wire] }).apply(schematic);
-    const junctions = [anchor, end]
-      .filter((p) => needsJunction(withWire, p))
+  const commitWireSegment = useCallback((anchor: Vec2, end: Vec2, bus: boolean) => {
+    const line = bus ? makeBus(anchor, end) : makeWire(anchor, end);
+    const withLine = addItems({ lines: [line] }).apply(schematic);
+    // Buses don't auto-junction (junctions are a wire/net concept in KiCad).
+    const junctions = bus ? [] : [anchor, end]
+      .filter((p) => needsJunction(withLine, p))
       .map((p) => makeJunction(p));
-    onCommand(addItems({ lines: [wire], junctions }));
+    onCommand(addItems({ lines: [line], junctions }));
   }, [schematic, onCommand]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
@@ -185,18 +197,31 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     if (!vp) return;
     const world = toWorld(e.clientX, e.clientY);
 
-    if (activeTool === 'drawWire') {
+    if (activeTool === 'drawWire' || activeTool === 'drawBus') {
+      const bus = activeTool === 'drawBus';
       const pt = snap(world);
       const anchor = wireAnchorRef.current;
       if (!anchor) { wireAnchorRef.current = pt; }
       else {
         const end = constrain(anchor, pt, lineMode);
         if (end.x !== anchor.x || end.y !== anchor.y) {
-          commitWireSegment(anchor, end);
+          commitWireSegment(anchor, end, bus);
           wireAnchorRef.current = end; // continue the chain
         }
       }
       draw();
+      return;
+    }
+
+    if (activeTool === 'junction') {
+      onCommand(addItems({ junctions: [makeJunction(snap(world))] }));
+      return;
+    }
+
+    const labelKind = LABEL_TOOLS[activeTool];
+    if (labelKind) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      setLabelDraft({ at: snap(world), kind: labelKind, screen: { x: e.clientX - rect.left, y: e.clientY - rect.top } });
       return;
     }
 
@@ -206,7 +231,7 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
       return;
     }
 
-    if (activeTool === 'placeSymbol') {
+    if (activeTool === 'placeSymbol' || activeTool === 'placePower') {
       if (placeLib) onCommand(placeSymbol(placeLib, snap(world), placeOrientRef.current)); // stays active to place more
       return;
     }
@@ -240,11 +265,11 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     cursorRef.current = world;
     onCursorMove?.(world);
 
-    if (activeTool === 'drawWire') {
+    if (activeTool === 'drawWire' || activeTool === 'drawBus') {
       if (wireAnchorRef.current) draw();
       return;
     }
-    if (activeTool === 'placeSymbol') {
+    if (activeTool === 'placeSymbol' || activeTool === 'placePower') {
       if (placeLib) draw(); // update the attached ghost
       return;
     }
@@ -284,8 +309,14 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
   }, [activeTool, onCommand, buildMove, onSelect, draw]);
 
   const onDoubleClick = useCallback(() => {
-    if (activeTool === 'drawWire') { wireAnchorRef.current = null; draw(); }
+    if (activeTool === 'drawWire' || activeTool === 'drawBus') { wireAnchorRef.current = null; draw(); }
   }, [activeTool, draw]);
+
+  const commitLabel = useCallback((text: string) => {
+    const draft = labelDraft;
+    if (draft && text.trim() !== '') onCommand(addItems({ labels: [makeLabel(draft.kind, text.trim(), draft.at)] }));
+    setLabelDraft(null);
+  }, [labelDraft, onCommand]);
 
   // Escape ends an in-progress wire; R/X/Y rotate/mirror (KiCad hotkeys): the
   // attached symbol while placing, otherwise the current selection.
@@ -301,7 +332,7 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
       const op: TransformOp | null = k === 'r' ? 'rotateCCW' : k === 'x' ? 'mirrorX' : k === 'y' ? 'mirrorY' : null;
       if (!op) return;
 
-      if (activeTool === 'placeSymbol' && placeLib) {
+      if ((activeTool === 'placeSymbol' || activeTool === 'placePower') && placeLib) {
         // Advance the attached symbol's orientation in place.
         const o = placeOrientRef.current;
         placeOrientRef.current = op === 'rotateCCW' ? rotateOrientation(o)
@@ -317,10 +348,13 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     return () => window.removeEventListener('keydown', onKey);
   }, [draw, activeTool, placeLib, selection, onCommand]);
 
+  // Focus the label text box as soon as a label placement starts.
+  useEffect(() => { if (labelDraft) labelInputRef.current?.focus(); }, [labelDraft]);
+
   const cursor = activeTool === 'select' ? 'default' : 'crosshair';
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
       <canvas
         ref={canvasRef}
         style={{ display: 'block', cursor, touchAction: 'none' }}
@@ -329,9 +363,24 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
-        onContextMenu={(e) => { e.preventDefault(); if (activeTool === 'drawWire') { wireAnchorRef.current = null; draw(); } }}
+        onContextMenu={(e) => { e.preventDefault(); if (activeTool === 'drawWire' || activeTool === 'drawBus') { wireAnchorRef.current = null; draw(); } }}
         onPointerLeave={() => { cursorRef.current = null; onCursorMove?.(null); }}
       />
+      {labelDraft && (
+        <input
+          ref={labelInputRef}
+          className="ze-label-input"
+          style={{ position: 'absolute', left: labelDraft.screen.x, top: labelDraft.screen.y }}
+          placeholder={labelDraft.kind === 'text' ? 'Text…' : 'Label…'}
+          autoFocus
+          defaultValue=""
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); commitLabel((e.target as HTMLInputElement).value); }
+            else if (e.key === 'Escape') { e.preventDefault(); setLabelDraft(null); }
+          }}
+        />
+      )}
     </div>
   );
 });

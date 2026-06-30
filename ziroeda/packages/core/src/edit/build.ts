@@ -9,7 +9,7 @@
 
 import { list, atom, str, type SList } from '../sexpr/types.js';
 import { iuToMM } from '../units.js';
-import type { SchLine, SchJunction, SchSymbol, SchField, LibSymbol, Vec2 } from '../model/types.js';
+import type { SchLine, SchJunction, SchSymbol, SchField, SchLabel, LabelKind, LibSymbol, Vec2 } from '../model/types.js';
 import type { Orientation } from '../geom/transform.js';
 
 /** A UUID for a new item. Falls back to a random hex string off-platform. */
@@ -63,6 +63,38 @@ export function makeWire(start: Vec2, end: Vec2): SchLine {
     uuid,
     source: buildWireNode(start, end, uuid),
   };
+}
+
+/** Create a new bus model item — KiCad's `(bus ...)`, same shape as a wire. */
+export function makeBus(start: Vec2, end: Vec2): SchLine {
+  const uuid = newUuid();
+  const node = list(
+    atom('bus'),
+    list(atom('pts'), xy(start), xy(end)),
+    list(atom('stroke'), list(atom('width'), atom('0')), list(atom('type'), atom('default'))),
+    list(atom('uuid'), str(uuid)),
+  );
+  return { kind: 'bus', start, end, stroke: { width: 0, type: 'default' }, uuid, source: node };
+}
+
+/**
+ * Create a net label / free text. Mirrors KiCad's `(label …)`, `(global_label …)`,
+ * `(hierarchical_label …)` and `(text …)`. Global/hierarchical labels carry a
+ * `(shape …)`; the default is bidirectional, as in KiCad's place-label tool.
+ */
+export function makeLabel(kind: LabelKind, text: string, at: Vec2, angle = 0): SchLabel {
+  const uuid = newUuid();
+  const justify = kind === 'label' ? list(atom('justify'), atom('left'), atom('bottom'))
+    : list(atom('justify'), atom('left'));
+  const effects = list(atom('effects'), list(atom('font'), list(atom('size'), atom('1.27'), atom('1.27'))), justify);
+  const items: SList['items'] = [atom(kind), str(text)];
+  if (kind === 'global_label' || kind === 'hierarchical_label') items.push(list(atom('shape'), atom('bidirectional')));
+  items.push(
+    list(atom('at'), atom(mm(at.x)), atom(mm(at.y)), atom(String(angle))),
+    effects,
+    list(atom('uuid'), str(uuid)),
+  );
+  return { kind, text, at, angle, effects: { hidden: false, fontSize: [12700, 12700], justify: kind === 'label' ? ['left', 'bottom'] : ['left'] }, uuid, source: { kind: 'list', items } };
 }
 
 /** Create a new junction model item (with its backing AST node). */

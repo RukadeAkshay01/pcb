@@ -91,10 +91,10 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
 
   const lineMode: LineMode = toggles.has('lineModeFree') ? 'free' : toggles.has('lineMode45') ? '45' : '90';
 
-  // Selecting the Place Symbol tool reopens the chooser (clears the attached symbol).
+  // Selecting a symbol/power placement tool reopens the chooser (clears the attached symbol).
   const onToolSelect = useCallback((id: string) => {
     setActiveTool(id);
-    if (id === 'placeSymbol') setPlaceLib(null);
+    if (id === 'placeSymbol' || id === 'placePower') setPlaceLib(null);
   }, []);
 
   const onTopAction = useCallback((id: string) => {
@@ -245,8 +245,8 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
         <span className="cell grow">{units}</span>
       </div>
 
-      {activeTool === 'placeSymbol' && !placeLib && (
-        <SymbolChooser onPick={setPlaceLib} onCancel={() => setActiveTool('select')} />
+      {(activeTool === 'placeSymbol' || activeTool === 'placePower') && !placeLib && (
+        <SymbolChooser onPick={setPlaceLib} onCancel={() => setActiveTool('select')} powerOnly={activeTool === 'placePower'} />
       )}
     </div>
   );

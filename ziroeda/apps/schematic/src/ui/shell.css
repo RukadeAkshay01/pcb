@@ -251,3 +251,17 @@ html, body { background: var(--chrome-bg2); }
 .ze-btn:hover:not(:disabled) { background: var(--chrome-hover); }
 .ze-btn.primary { background: var(--chrome-active); border-color: var(--chrome-active-border); }
 .ze-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Inline text entry for placing a label / global label / text. */
+.ze-label-input {
+  z-index: 20;
+  min-width: 120px;
+  padding: 2px 6px;
+  font: 13px/1.4 monospace;
+  color: #d7263d;
+  background: #fff;
+  border: 1px solid var(--chrome-active-border, #2d6cdf);
+  border-radius: 2px;
+  outline: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+}

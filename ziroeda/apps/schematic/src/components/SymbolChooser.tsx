@@ -7,20 +7,23 @@ import { KICAD_CLASSIC } from '../theme.js';
 interface Props {
   onPick: (lib: LibSymbol) => void;
   onCancel: () => void;
+  /** Restrict to power-port libraries (KiCad's "Add Power" filters to power symbols). */
+  powerOnly?: boolean;
 }
 
 const MAX_RESULTS = 500;
 
 /** KiCad-style "Choose Symbol" modal: search/browse on the left, live preview on the right. */
-export function SymbolChooser({ onPick, onCancel }: Props): JSX.Element {
-  const [index, setIndex] = useState<LibIndexEntry[]>([]);
+export function SymbolChooser({ onPick, onCancel, powerOnly = false }: Props): JSX.Element {
+  const [rawIndex, setRawIndex] = useState<LibIndexEntry[]>([]);
+  const index = useMemo(() => (powerOnly ? rawIndex.filter((l) => /power/i.test(l.name)) : rawIndex), [rawIndex, powerOnly]);
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewSym, setPreviewSym] = useState<LibSymbol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  useEffect(() => { loadIndex().then(setIndex).catch(() => setIndex([])); }, []);
+  useEffect(() => { loadIndex().then(setRawIndex).catch(() => setRawIndex([])); }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -100,7 +103,7 @@ export function SymbolChooser({ onPick, onCancel }: Props): JSX.Element {
     <div className="ze-modal-backdrop" onMouseDown={onCancel}>
       <div className="ze-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="ze-modal-header">
-          Choose Symbol
+          {powerOnly ? 'Choose Power Symbol' : 'Choose Symbol'}
           <span className="x" onClick={onCancel}>✕</span>
         </div>
         <div className="ze-modal-body">
