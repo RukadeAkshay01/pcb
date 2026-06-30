@@ -50,10 +50,13 @@ function transformSymbol(s: SchSymbol, op: TransformOp, center: Vec2): SchSymbol
     : op === 'mirrorX' ? mirrorOrientation({ angle: s.angle, mirror: s.mirror }, 'x')
     : mirrorOrientation({ angle: s.angle, mirror: s.mirror }, 'y');
 
-  // Move the fields rigidly with the body so the text rotates/mirrors with the
-  // symbol. (KiCad re-runs AutoplaceFields here; that fuller placement is a tracked
-  // follow-up — a rigid move keeps fields attached and readable in the meantime.)
-  const fields = s.fields.map((f: SchField) => (f.at ? { ...f, at: movePoint(f.at, op, center) } : f));
+  // Fields translate with the symbol's position delta, exactly as KiCad's
+  // SCH_SYMBOL::Rotate / Mirror* do (for a single symbol about its own anchor this
+  // delta is zero, so they stay put). Their *display* angle then rotates with the
+  // symbol via GetDrawRotation in the renderer. (KiCad's AutoplaceFields repositions
+  // them afterwards; that fuller placement is a tracked follow-up.)
+  const d: Vec2 = { x: at.x - s.at.x, y: at.y - s.at.y };
+  const fields = s.fields.map((f: SchField) => (f.at ? { ...f, at: { x: f.at.x + d.x, y: f.at.y + d.y } } : f));
   const next: { -readonly [K in keyof SchSymbol]: SchSymbol[K] } = { ...s, at, angle: orient.angle, fields };
   if (orient.mirror) next.mirror = orient.mirror;
   else delete next.mirror;

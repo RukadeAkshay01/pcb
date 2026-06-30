@@ -103,11 +103,17 @@ export function renderSchematic(
         if (libUnitMatches(unit, sym.unit, sym.bodyStyle)) drawLibUnit(ctx, unit, sym.at, t, theme, pins);
       }
     }
-    // Instance fields are stored in absolute schematic coordinates.
+    // Instance fields are stored in absolute schematic coordinates. KiCad's
+    // SCH_FIELD::GetDrawRotation toggles the field's display angle when the parent
+    // symbol's transform.y1 != 0 (a 90°/270° rotation), so the text reads with the
+    // symbol — horizontal field on an upright symbol becomes vertical when rotated.
+    const ty1 = symbolTransform(sym.angle, sym.mirror).y1;
     for (const f of sym.fields) {
       if (!f.at || f.effects?.hidden || f.value === '') continue;
       const color = f.key === 'Reference' ? theme.reference : f.key === 'Value' ? theme.value : theme.label;
-      drawText(ctx, f.value, f.at, f.effects?.fontSize?.[0] ?? 1.27 * MM, color, f.effects?.justify);
+      const storedHoriz = (f.angle % 180) === 0;
+      const drawHoriz = ty1 !== 0 ? !storedHoriz : storedHoriz;
+      drawText(ctx, f.value, f.at, f.effects?.fontSize?.[0] ?? 1.27 * MM, color, f.effects?.justify, drawHoriz ? 0 : 90);
     }
   }
 
@@ -460,6 +466,7 @@ function drawText(
   heightIU: number,
   color: string,
   justify?: readonly string[],
+  angleDeg = 0,
 ): void {
   if (text === '' || text === '~') return;
   ctx.fillStyle = color;
@@ -469,7 +476,17 @@ function drawText(
   ctx.font = `${heightIU}px sans-serif`;
   ctx.textAlign = justify?.includes('right') ? 'right' : justify?.includes('left') ? 'left' : 'center';
   ctx.textBaseline = justify?.includes('top') ? 'top' : justify?.includes('bottom') ? 'bottom' : 'middle';
-  ctx.fillText(text, at.x, at.y);
+  const a = ((angleDeg % 360) + 360) % 360;
+  if (a === 0) {
+    ctx.fillText(text, at.x, at.y);
+  } else {
+    // Vertical (or rotated) schematic text: KiCad reads 90° text bottom-to-top.
+    ctx.save();
+    ctx.translate(at.x, at.y);
+    ctx.rotate((-a * Math.PI) / 180);
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
 }
 
 function drawGrid(
