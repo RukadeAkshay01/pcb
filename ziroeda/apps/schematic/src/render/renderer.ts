@@ -97,8 +97,9 @@ export function renderSchematic(
     const lib = libById.get(sym.libId);
     if (lib) {
       const t = symbolTransform(sym.angle, sym.mirror);
+      const pins = { numbersHidden: lib.pinNumbersHidden, namesHidden: lib.pinNamesHidden, nameOffset: lib.pinNameOffset };
       for (const unit of lib.units) {
-        if (libUnitMatches(unit, sym.unit, sym.bodyStyle)) drawLibUnit(ctx, unit, sym.at, t, theme);
+        if (libUnitMatches(unit, sym.unit, sym.bodyStyle)) drawLibUnit(ctx, unit, sym.at, t, theme, pins);
       }
     }
     // Instance fields are stored in absolute schematic coordinates.
@@ -159,12 +160,29 @@ function drawSelection(
   }
 }
 
+interface PinDisplay {
+  numbersHidden: boolean;
+  namesHidden: boolean;
+  nameOffset: number;
+}
+
+/** Local-space unit vector pointing from a pin's connection point toward the body. */
+function pinDir(angle: number): Vec2 {
+  switch (((angle % 360) + 360) % 360) {
+    case 0: return { x: 1, y: 0 };
+    case 90: return { x: 0, y: -1 };
+    case 180: return { x: -1, y: 0 };
+    default: return { x: 0, y: 1 };
+  }
+}
+
 function drawLibUnit(
   ctx: CanvasRenderingContext2D,
   unit: LibSymbolUnit,
   origin: Vec2,
   t: Transform,
   theme: Theme,
+  pins: PinDisplay,
 ): void {
   for (const g of unit.graphics) {
     const lw = g.kind !== 'text' && g.stroke && g.stroke.width > 0 ? g.stroke.width : DEFAULT_LINE_WIDTH;
@@ -210,13 +228,38 @@ function drawLibUnit(
   }
 
   // Pins.
+  const NUM = 1.27 * MM, NAME = 1.27 * MM, MARGIN = 0.25 * MM;
   for (const pin of unit.pins) {
     if (pin.hidden) continue;
+    const endLocal = pinBodyEnd(pin.at, pin.angle, pin.length);
     const a = localToWorld(origin, t, pin.at);
-    const b = localToWorld(origin, t, pinBodyEnd(pin.at, pin.angle, pin.length));
+    const b = localToWorld(origin, t, endLocal);
     ctx.strokeStyle = theme.pin;
     ctx.lineWidth = DEFAULT_LINE_WIDTH;
     strokeLine(ctx, a, b);
+
+    const dir = pinDir(pin.angle);
+    const horiz = dir.y === 0;
+
+    // Pin number: centred over the pin line, offset to one side.
+    if (!pins.numbersHidden && pin.number && pin.number !== '~') {
+      const mid = { x: (pin.at.x + endLocal.x) / 2, y: (pin.at.y + endLocal.y) / 2 };
+      const off = NUM / 2 + MARGIN;
+      const anchor = localToWorld(origin, t, horiz ? { x: mid.x, y: mid.y - off } : { x: mid.x - off, y: mid.y });
+      drawText(ctx, pin.number, anchor, NUM, theme.pinNumber);
+    }
+
+    // Pin name: inside the body at the inner end (offset > 0), else just outside.
+    if (!pins.namesHidden && pin.name && pin.name !== '~') {
+      if (pins.nameOffset > 0) {
+        const anchor = localToWorld(origin, t, { x: endLocal.x + dir.x * pins.nameOffset, y: endLocal.y + dir.y * pins.nameOffset });
+        const justify = horiz ? [dir.x > 0 ? 'left' : 'right'] : ['left'];
+        drawText(ctx, pin.name, anchor, NAME, theme.pinName, justify);
+      } else {
+        const anchor = localToWorld(origin, t, horiz ? { x: endLocal.x - dir.x * MARGIN, y: endLocal.y - NAME / 2 } : { x: endLocal.x, y: endLocal.y });
+        drawText(ctx, pin.name, anchor, NAME, theme.pinName, horiz ? [dir.x > 0 ? 'right' : 'left'] : undefined);
+      }
+    }
   }
 }
 
@@ -311,6 +354,49 @@ function drawGrid(
       ctx.fillRect(x - dot / 2, y - dot / 2, dot, dot);
     }
   }
+}
+
+/** Render a single library symbol centred and scaled into a preview canvas. */
+export function renderSymbolPreview(
+  ctx: CanvasRenderingContext2D,
+  lib: LibSymbol,
+  width: number,
+  height: number,
+  theme: Theme,
+): void {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = theme.background;
+  ctx.fillRect(0, 0, width, height);
+
+  const units = lib.units.filter((u) => libUnitMatches(u, 1, 1));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const inc = (p: Vec2) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); };
+  for (const u of units) {
+    for (const g of u.graphics) {
+      if (g.kind === 'rectangle') { inc(g.start); inc(g.end); }
+      else if (g.kind === 'polyline') g.points.forEach(inc);
+      else if (g.kind === 'circle') { inc({ x: g.center.x - g.radius, y: g.center.y - g.radius }); inc({ x: g.center.x + g.radius, y: g.center.y + g.radius }); }
+      else if (g.kind === 'arc') { inc(g.start); inc(g.mid); inc(g.end); }
+      else inc(g.at);
+    }
+    for (const pin of u.pins) { inc(pin.at); inc(pinBodyEnd(pin.at, pin.angle, pin.length)); }
+  }
+  if (!Number.isFinite(minX)) {
+    ctx.fillStyle = '#888';
+    ctx.font = '14px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('No preview', width / 2, height / 2);
+    return;
+  }
+
+  const bw = (maxX - minX) || 1, bh = (maxY - minY) || 1;
+  const scale = Math.min(width / (bw * 1.35), height / (bh * 1.35));
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  ctx.setTransform(scale, 0, 0, scale, width / 2 - cx * scale, height / 2 - cy * scale);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const pins = { numbersHidden: lib.pinNumbersHidden, namesHidden: lib.pinNamesHidden, nameOffset: lib.pinNameOffset };
+  for (const u of units) drawLibUnit(ctx, u, { x: 0, y: 0 }, symbolTransform(0), theme, pins);
 }
 
 /** Compute a viewport that fits the schematic content into the given canvas size. */

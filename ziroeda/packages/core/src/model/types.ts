@@ -89,7 +89,15 @@ export interface LibSymbolUnit {
 export interface LibSymbol {
   /** Library id as written, e.g. "Connector_Generic:Conn_01x02". */
   readonly libId: string;
+  /** Parent symbol name if this is a derived symbol (`extends`); units come from it. */
+  readonly extends?: string;
   readonly isPower: boolean;
+  /** `(pin_numbers (hide yes))` — hide all pin numbers. */
+  readonly pinNumbersHidden: boolean;
+  /** `(pin_names (hide yes))` — hide all pin names. */
+  readonly pinNamesHidden: boolean;
+  /** `(pin_names (offset X))` — distance pin names sit inside the body, in IU. */
+  readonly pinNameOffset: number;
   /** Visible/!hidden fields (Reference, Value, Footprint, …) keyed by name. */
   readonly properties: readonly SchField[];
   readonly units: readonly LibSymbolUnit[];

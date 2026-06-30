@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, History, type Schematic, type LibSymbol, type EditCommand, type Vec2 } from '@ziroeda/core';
 import { SchematicCanvas, type CanvasController, type LineMode } from './components/SchematicCanvas.js';
 import { Toolbar } from './ui/Toolbar.js';
-import { TOP_TOOLBAR, LEFT_TOOLBAR, RIGHT_TOOLBAR, MENUS } from './ui/toolbars.js';
+import { TOP_TOOLBAR, LEFT_TOOLBAR, RIGHT_TOOLBAR } from './ui/toolbars.js';
+import { MenuBar } from './ui/MenuBar.js';
+import { buildMenus, TOOL_HOTKEYS } from './ui/menus.js';
 import { SymbolChooser } from './components/SymbolChooser.js';
 import { HomePage } from './HomePage.js';
 import './ui/shell.css';
@@ -89,6 +91,12 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
 
   const lineMode: LineMode = toggles.has('lineModeFree') ? 'free' : toggles.has('lineMode45') ? '45' : '90';
 
+  // Selecting the Place Symbol tool reopens the chooser (clears the attached symbol).
+  const onToolSelect = useCallback((id: string) => {
+    setActiveTool(id);
+    if (id === 'placeSymbol') setPlaceLib(null);
+  }, []);
+
   const onTopAction = useCallback((id: string) => {
     if (id === 'zoomFit' || id === 'zoomFitObjects') controller.current?.zoomToFit();
     else if (id === 'zoomIn') controller.current?.zoomIn();
@@ -97,6 +105,8 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
     else if (id === 'redo') redo();
     else if (id === 'save') save();
   }, [undo, redo, save]);
+
+  const menus = useMemo(() => buildMenus({ tool: onToolSelect, action: onTopAction }), [onToolSelect, onTopAction]);
 
   const onLeftToggle = useCallback((id: string) => {
     setToggles((prev) => {
@@ -127,11 +137,17 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
         e.preventDefault();
         runCommand(deleteByIds(selection));
         setSelection(new Set());
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        // KiCad single-key tool hotkeys (A=symbol, W=wire, …). Skip while typing.
+        const tgt = e.target as HTMLElement | null;
+        const typing = !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable);
+        const toolId = TOOL_HOTKEYS[e.key.toLowerCase()];
+        if (!typing && toolId) { e.preventDefault(); onToolSelect(toolId); }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, save, selection, runCommand, activeTool]);
+  }, [undo, redo, save, selection, runCommand, activeTool, onToolSelect]);
 
   const units = toggles.has('unitsInches') ? 'in' : toggles.has('unitsMils') ? 'mils' : 'mm';
   const fmt = (iu: number): string => {
@@ -149,55 +165,51 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
 
   return (
     <div className="ze-app">
-      <div className="ze-menubar">
-        <div className="ze-home-link" onClick={onExitToHome} title="Back to project manager">⌂ ZiroEDA</div>
-        {MENUS.map((m) => <div key={m} className="ze-menu">{m}</div>)}
-      </div>
+      <MenuBar
+        menus={menus}
+        leftSlot={<div className="ze-home-link" onClick={onExitToHome} title="Back to project manager">⌂ ZiroEDA</div>}
+      />
 
       <Toolbar entries={TOP_TOOLBAR} orientation="horizontal" onActivate={onTopAction} />
 
       <div className="ze-body">
-        {activeTool === 'placeSymbol' ? (
-          <SymbolChooser onPick={setPlaceLib} currentId={placeLib?.libId ?? null} />
-        ) : (
-          <div className="ze-leftdock">
-            <div className="ze-panel grow">
-              <div className="ze-panel-header">Properties</div>
-              <div className="ze-panel-body">
-                <div className="ze-muted">{selection.size === 0 ? 'No objects selected' : `${selection.size} item(s) selected`}</div>
-              </div>
+        <div className="ze-leftdock">
+          <div className="ze-panel grow">
+            <div className="ze-panel-header">Properties</div>
+            <div className="ze-panel-body">
+              <div className="ze-muted">{selection.size === 0 ? 'No objects selected' : `${selection.size} item(s) selected`}</div>
             </div>
-            <div className="ze-panel grow">
-              <div className="ze-panel-header">Schematic Hierarchy</div>
-              <div className="ze-panel-body"><div className="ze-tree-item active">📄 {title} (page 1)</div></div>
-            </div>
-            <div className="ze-panel">
-              <div className="ze-panel-header">Selection Filter</div>
-              <div className="ze-panel-body">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selFilter.size === FILTER_CATS.length}
-                    onChange={() => setSelFilter((p) => (p.size === FILTER_CATS.length ? new Set() : new Set(FILTER_CATS.map((c) => c[0]))))}
-                  />
-                  All items
-                </label>
-                <div className="ze-selfilter">
-                  {FILTER_CATS.map(([key, label]) => (
-                    <label key={key}>
-                      <input
-                        type="checkbox"
-                        checked={selFilter.has(key)}
-                        onChange={() => setSelFilter((p) => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; })}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
+          </div>
+          <div className="ze-panel grow">
+            <div className="ze-panel-header">Schematic Hierarchy</div>
+            <div className="ze-panel-body"><div className="ze-tree-item active">📄 {title} (page 1)</div></div>
+          </div>
+          <div className="ze-panel">
+            <div className="ze-panel-header">Selection Filter</div>
+            <div className="ze-panel-body">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selFilter.size === FILTER_CATS.length}
+                  onChange={() => setSelFilter((p) => (p.size === FILTER_CATS.length ? new Set() : new Set(FILTER_CATS.map((c) => c[0]))))}
+                />
+                All items
+              </label>
+              <div className="ze-selfilter">
+                {FILTER_CATS.map(([key, label]) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={selFilter.has(key)}
+                      onChange={() => setSelFilter((p) => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n; })}
+                    />
+                    {label}
+                  </label>
+                ))}
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         <Toolbar entries={LEFT_TOOLBAR} orientation="vertical" side="left" toggled={toggles} onActivate={onLeftToggle} />
 
@@ -217,7 +229,7 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
           />
         </div>
 
-        <Toolbar entries={RIGHT_TOOLBAR} orientation="vertical" side="right" activeTool={activeTool} onActivate={setActiveTool} />
+        <Toolbar entries={RIGHT_TOOLBAR} orientation="vertical" side="right" activeTool={activeTool} onActivate={onToolSelect} />
       </div>
 
       <div className="ze-statusbar">
@@ -229,6 +241,10 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
         <span className="cell">grid {units === 'mm' ? '1.2700' : units === 'mils' ? '50' : '0.0500'}</span>
         <span className="cell grow">{units}</span>
       </div>
+
+      {activeTool === 'placeSymbol' && !placeLib && (
+        <SymbolChooser onPick={setPlaceLib} onCancel={() => setActiveTool('select')} />
+      )}
     </div>
   );
 }

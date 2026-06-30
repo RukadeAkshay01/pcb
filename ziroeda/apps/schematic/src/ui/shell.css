@@ -205,3 +205,45 @@ html, body { background: var(--chrome-bg2); }
   font: inherit; outline: none;
 }
 .ze-search:focus { border-color: var(--chrome-active-border); }
+
+/* Menu bar dropdowns */
+.ze-menubar { position: relative; z-index: 50; }
+.ze-menu { position: relative; }
+.ze-menu.open { background: var(--chrome-active); }
+.ze-dropdown {
+  position: absolute; top: 100%; left: 0; min-width: 250px;
+  background: var(--chrome-bg); border: 1px solid var(--chrome-border);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45); z-index: 100; padding: 4px 0;
+  cursor: default;
+}
+.ze-mitem { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+.ze-mitem:hover { background: var(--chrome-hover); }
+.ze-mitem.disabled { opacity: 0.4; cursor: default; }
+.ze-mitem.disabled:hover { background: transparent; }
+.ze-mitem .mico { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.ze-mitem .mico img { width: 18px; height: 18px; }
+.ze-mitem .lbl { flex: 1; }
+.ze-mitem .sc { color: #8a8c90; font-size: 11px; padding-left: 20px; }
+.ze-msep { height: 1px; background: var(--chrome-border); margin: 4px 0; }
+
+/* Symbol chooser modal (KiCad-style centered dialog) */
+.ze-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.ze-modal { width: 860px; height: 580px; max-width: 92vw; max-height: 88vh; background: var(--chrome-bg); border: 1px solid var(--chrome-border); border-radius: 6px; display: flex; flex-direction: column; box-shadow: 0 14px 44px rgba(0,0,0,0.55); }
+.ze-modal-header { padding: 8px 12px; font-weight: 600; border-bottom: 1px solid var(--chrome-border); display: flex; align-items: center; }
+.ze-modal-header .x { margin-left: auto; cursor: pointer; padding: 0 6px; color: #9a9ca0; }
+.ze-modal-header .x:hover { color: var(--chrome-fg); }
+.ze-modal-body { flex: 1; display: flex; min-height: 0; }
+.ze-chooser-tree { width: 380px; display: flex; flex-direction: column; border-right: 1px solid var(--chrome-border); }
+.ze-chooser-tree .top { padding: 8px; border-bottom: 1px solid var(--chrome-border); }
+.ze-chooser-list { flex: 1; overflow: auto; padding: 4px 6px; }
+.ze-chooser-right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ze-preview-canvas { flex: 1; min-height: 0; background: #fff; }
+.ze-preview-info { padding: 8px 12px; border-top: 1px solid var(--chrome-border); font-size: 12px; min-height: 78px; }
+.ze-preview-info .nm { font-weight: 700; font-size: 13px; }
+.ze-preview-info .desc { color: #b6b8bb; margin-top: 3px; }
+.ze-preview-info .kw { color: #7f97b0; margin-top: 3px; font-style: italic; }
+.ze-modal-footer { padding: 8px 12px; border-top: 1px solid var(--chrome-border); display: flex; gap: 8px; justify-content: flex-end; }
+.ze-btn { padding: 5px 16px; background: var(--chrome-bg2); border: 1px solid var(--chrome-border); border-radius: 4px; color: var(--chrome-fg); cursor: pointer; font: inherit; }
+.ze-btn:hover:not(:disabled) { background: var(--chrome-hover); }
+.ze-btn.primary { background: var(--chrome-active); border-color: var(--chrome-active-border); }
+.ze-btn:disabled { opacity: 0.5; cursor: default; }

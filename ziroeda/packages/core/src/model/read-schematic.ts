@@ -16,6 +16,7 @@ import {
   childNamed,
   childrenNamed,
   numArg,
+  numberField,
   stringField,
 } from '../sexpr/query.js';
 import type {
@@ -194,13 +195,49 @@ function readLibSymbol(node: SList): LibSymbol {
     if (head(item) === 'symbol') units.push(readLibSymbolUnit(item));
     else if (head(item) === 'property') properties.push(readField(item));
   }
-  return {
+  const extendsName = stringField(node, 'extends');
+  const pinNamesNode = childNamed(node, 'pin_names');
+  const pinNumbersNode = childNamed(node, 'pin_numbers');
+  const bareHide = (n: SList | undefined): boolean =>
+    n !== undefined && (boolField(n, 'hide', false) || n.items.some((it) => it.kind === 'atom' && it.value === 'hide'));
+  const sym: { -readonly [K in keyof LibSymbol]: LibSymbol[K] } = {
     libId: arg(node, 0) ?? '',
     isPower: childNamed(node, 'power') !== undefined,
+    pinNumbersHidden: bareHide(pinNumbersNode),
+    pinNamesHidden: bareHide(pinNamesNode),
+    pinNameOffset: pinNamesNode ? mmToIU(numberField(pinNamesNode, 'offset') ?? 0.508) : mmToIU(0.508),
     properties,
     units,
     source: node,
   };
+  if (extendsName !== undefined) sym.extends = extendsName;
+  return sym;
+}
+
+/**
+ * Resolve derived symbols, faithful to KiCad: a symbol with `(extends "Parent")`
+ * inherits the parent's units (graphics + pins) and power flag, keeping its own
+ * properties. Parent and child live in the same library. Resolution follows the
+ * chain (a parent may itself be derived).
+ */
+function resolveExtends(symbols: LibSymbol[]): LibSymbol[] {
+  const byName = new Map<string, LibSymbol>();
+  for (const s of symbols) byName.set(s.libId, s);
+
+  const resolveUnits = (s: LibSymbol, seen: Set<string>): { units: readonly LibSymbolUnit[]; isPower: boolean } => {
+    if (!s.extends || seen.has(s.libId)) return { units: s.units, isPower: s.isPower };
+    const parent = byName.get(s.extends);
+    if (!parent) return { units: s.units, isPower: s.isPower };
+    seen.add(s.libId);
+    const r = resolveUnits(parent, seen);
+    return { units: s.units.length ? s.units : r.units, isPower: s.isPower || r.isPower };
+  };
+
+  return symbols.map((s) => {
+    if (!s.extends) return s;
+    const r = resolveUnits(s, new Set());
+    return { ...s, units: r.units, isPower: r.isPower };
+  });
 }
 
 // ----- instance items -------------------------------------------------------
@@ -302,7 +339,7 @@ const LINE_KINDS: Record<string, LineKind> = {
  * These use the same definition format as embedded library symbols.
  */
 export function readSymbolLib(root: SList): LibSymbol[] {
-  return childrenNamed(root, 'symbol').map(readLibSymbol);
+  return resolveExtends(childrenNamed(root, 'symbol').map(readLibSymbol));
 }
 
 export function readSchematic(root: SList): Schematic {
@@ -318,7 +355,8 @@ export function readSchematic(root: SList): Schematic {
 
   const libSymbolsNode = childNamed(root, 'lib_symbols');
   if (libSymbolsNode) {
-    for (const sym of childrenNamed(libSymbolsNode, 'symbol')) libSymbols.push(readLibSymbol(sym));
+    for (const sym of resolveExtends(childrenNamed(libSymbolsNode, 'symbol').map(readLibSymbol)))
+      libSymbols.push(sym);
   }
 
   for (const item of root.items) {

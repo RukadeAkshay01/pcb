@@ -44,3 +44,22 @@ describe('placeSymbol', () => {
     expect(undone.libSymbols).toHaveLength(0); // newly-added def removed too
   });
 });
+
+describe('derived symbols (extends)', () => {
+  it('inherits the parent body/pins, keeps its own properties', () => {
+    const text = `(kicad_symbol_lib (version 1) (generator "x")
+      (symbol "BASE" (property "Reference" "D" (at 0 0 0))
+        (symbol "BASE_0_1" (rectangle (start -1 1) (end 1 -1) (stroke (width 0.2)) (fill (type none))))
+        (symbol "BASE_1_1" (pin passive line (at -3 0 0) (length 2) (name "A") (number "1"))))
+      (symbol "CHILD" (extends "BASE")
+        (property "Reference" "D" (at 0 0 0)) (property "Value" "CHILD" (at 0 -2 0))))`;
+    const libs = readSymbolLib(parse(text));
+    const child = libs.find((l) => l.libId === 'CHILD')!;
+    // Inherited graphics + pins from BASE.
+    expect(child.units.length).toBeGreaterThan(0);
+    expect(child.units.flatMap((u) => u.graphics).length).toBeGreaterThan(0);
+    expect(child.units.flatMap((u) => u.pins).length).toBe(1);
+    // Own Value property preserved.
+    expect(child.properties.find((p) => p.key === 'Value')!.value).toBe('CHILD');
+  });
+});
