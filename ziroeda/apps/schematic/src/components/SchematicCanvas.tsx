@@ -57,6 +57,8 @@ interface Props {
   placeLib: LibSymbol | null;
   /** A named label that follows the cursor until clicked to place (null = none yet). */
   pendingLabel: PendingLabel | null;
+  /** Wire ids whose net is highlighted (KiCad's net-highlight overlay). */
+  highlight?: ReadonlySet<string>;
   onSelect: (id: string | null, additive: boolean) => void;
   onCommand: (cmd: EditCommand) => void;
   onCursorMove?: (world: Vec2 | null) => void;
@@ -66,7 +68,7 @@ interface Props {
 type Mode = 'idle' | 'pan' | 'move';
 
 export const SchematicCanvas = forwardRef<CanvasController, Props>(function SchematicCanvas(
-  { schematic, libById, selection, activeTool, lineMode, placeLib, pendingLabel, onSelect, onCommand, onCursorMove, onScaleChange },
+  { schematic, libById, selection, activeTool, lineMode, placeLib, pendingLabel, highlight, onSelect, onCommand, onCursorMove, onScaleChange },
   ref,
 ): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -116,7 +118,7 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     if (pendingLabel && cursorRef.current) {
       doc = addItems({ labels: [makeLabel(pendingLabel.kind, pendingLabel.text, snap(cursorRef.current), { shape: pendingLabel.shape })] }).apply(doc);
     }
-    renderSchematic(ctx, doc, vp, KICAD_CLASSIC, canvas.width, canvas.height, selection);
+    renderSchematic(ctx, doc, vp, KICAD_CLASSIC, canvas.width, canvas.height, selection, highlight);
 
     // Wire / bus preview segment.
     const anchor = wireAnchorRef.current;
@@ -132,7 +134,7 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
       ctx.stroke();
     }
     onScaleChange?.(vp.scale);
-  }, [schematic, selection, activeTool, lineMode, placeLib, pendingLabel, buildMove, onScaleChange]);
+  }, [schematic, selection, activeTool, lineMode, placeLib, pendingLabel, highlight, buildMove, onScaleChange]);
 
   const zoomAbout = useCallback((px: number, py: number, factor: number) => {
     const vp = viewportRef.current;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type TransformOp, type LabelKind, type LabelShape } from '@ziroeda/core';
+import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type TransformOp, type LabelKind, type LabelShape } from '@ziroeda/core';
 import { SchematicCanvas, type CanvasController, type LineMode, type PendingLabel } from './components/SchematicCanvas.js';
 import { LabelDialog } from './components/LabelDialog.js';
 import { Toolbar } from './ui/Toolbar.js';
@@ -65,6 +65,26 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
     () => new Map((doc?.libSymbols ?? []).map((l) => [l.libId, l])),
     [doc?.libSymbols],
   );
+
+  // Connectivity: compute the netlist, then highlight the net of any selected item.
+  // The renderer only matches wire ids against this set, so passing all net-item
+  // ids (which also include label/junction/pin ids) is harmless.
+  const netlist = useMemo(() => (doc ? computeNetlist(doc, libById) : null), [doc, libById]);
+  const { highlightWires, highlightName } = useMemo(() => {
+    const items = new Set<string>();
+    let name: string | null = null;
+    if (netlist) {
+      for (const id of selection) {
+        const code = netlist.netByItem.get(id);
+        if (code === undefined) continue;
+        const net = netlist.nets.find((n) => n.code === code);
+        if (!net) continue;
+        name = net.name;
+        for (const item of net.items) items.add(item);
+      }
+    }
+    return { highlightWires: items, highlightName: name };
+  }, [netlist, selection]);
 
   const onSelect = useCallback((id: string | null, additive: boolean) => {
     setSelection((prev) => {
@@ -238,6 +258,7 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
             lineMode={lineMode}
             placeLib={placeLib}
             pendingLabel={pendingLabel}
+            highlight={highlightWires}
             onSelect={onSelect}
             onCommand={runCommand}
             onCursorMove={setCursor}
@@ -255,6 +276,7 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
           dx {cursor ? fmt(cursor.x) : '—'}  dy {cursor ? fmt(cursor.y) : '—'}  dist {cursor ? fmt(Math.hypot(cursor.x, cursor.y)) : '—'}
         </span>
         <span className="cell">grid {units === 'mm' ? '1.2700' : units === 'mils' ? '50' : '0.0500'}</span>
+        <span className="cell">{highlightName ? `Net: ${highlightName}` : ''}</span>
         <span className="cell grow">{units}</span>
       </div>
 

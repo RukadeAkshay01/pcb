@@ -21,6 +21,7 @@ export interface Theme {
   label: string;
   globalLabel: string;
   hierLabel: string;
+  netHighlight: string;
   noText: string;
 }
 
@@ -40,5 +41,6 @@ export const KICAD_CLASSIC: Theme = {
   label: '#000000', // local label: black
   globalLabel: '#840000', // dark red
   hierLabel: '#840084', // magenta
+  netHighlight: 'rgba(255, 222, 89, 0.75)', // bright yellow net-highlight halo
   noText: '#0000c4',
 };

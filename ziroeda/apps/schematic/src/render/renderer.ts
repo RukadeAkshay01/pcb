@@ -60,6 +60,7 @@ export function renderSchematic(
   canvasWidth: number,
   canvasHeight: number,
   selection?: ReadonlySet<string>,
+  highlight?: ReadonlySet<string>,
 ): void {
   const libById = new Map<string, LibSymbol>();
   for (const lib of sch.libSymbols) libById.set(lib.libId, lib);
@@ -76,6 +77,17 @@ export function renderSchematic(
   ctx.lineJoin = 'round';
 
   drawGrid(ctx, viewport, theme, canvasWidth, canvasHeight);
+
+  // Highlighted net: draw a bright translucent halo under the wires (KiCad's
+  // net-highlight overlay) before the wires themselves.
+  if (highlight && highlight.size > 0) {
+    ctx.strokeStyle = theme.netHighlight;
+    sch.lines.forEach((line, i) => {
+      if (!highlight.has(refId('line', line.uuid, i))) return;
+      ctx.lineWidth = (line.kind === 'bus' ? 0.9 : 0.7) * MM;
+      strokeLine(ctx, line.start, line.end);
+    });
+  }
 
   // Wires and buses.
   for (const line of sch.lines) {
