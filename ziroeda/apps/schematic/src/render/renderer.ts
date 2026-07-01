@@ -80,20 +80,42 @@ export function renderSchematic(
 
   const hl = (id: string): boolean => highlight !== undefined && highlight.has(id);
 
-  // Highlighted net: KiCad draws a translucent LAYER_BRIGHTENED (magenta) shadow
-  // halo behind the net's items, wider than the wire, then recolours the items
-  // themselves to the brightened colour (getRenderColor with IsBrightened()).
+  // Net highlighting, ported from SCH_PAINTER: brightened items are drawn twice —
+  // once on LAYER_SELECTION_SHADOWS (a wider stroke of the brightened colour at 15%
+  // alpha, i.e. getRenderColor()'s `color.WithAlpha(0.15)` branch for IsBrightened()
+  // with aDrawingShadows), then again on their normal layer at full-opacity
+  // LAYER_BRIGHTENED with their ordinary pen width (getRenderColor/getLineWidth with
+  // aDrawingShadows == false). getShadowWidth() adds highlight_thickness (2 mils,
+  // eeschema_settings.cpp) both as a screen-space term (scaled by current zoom) and as
+  // a fixed minimum in world units, so the halo doesn't vanish when zoomed out.
+  const HIGHLIGHT_THICKNESS_MILS = 2;
+  const MIL = 0.0254 * MM; // 1 mil in IU
+  const shadowWidth = Math.abs(HIGHLIGHT_THICKNESS_MILS / scale) + HIGHLIGHT_THICKNESS_MILS * MIL;
+  const HALO_COLOR = 'rgba(255, 0, 255, 0.15)'; // LAYER_BRIGHTENED at 15% alpha
+
   if (highlight && highlight.size > 0) {
-    ctx.strokeStyle = 'rgba(255, 0, 255, 0.25)';
+    ctx.strokeStyle = HALO_COLOR;
     sch.lines.forEach((line, i) => {
       if (!hl(refId('line', line.uuid, i))) return;
       const base = line.stroke && line.stroke.width > 0 ? line.stroke.width : DEFAULT_LINE_WIDTH;
-      ctx.lineWidth = base + 0.4 * MM;
+      ctx.lineWidth = base + shadowWidth;
       strokeLine(ctx, line.start, line.end);
+    });
+    // Junction shadows are drawn as a stroked ring at the junction's own radius
+    // (SCH_PAINTER::draw(SCH_JUNCTION*): SetIsStroke(drawingShadows), unchanged
+    // circle radius), not a bigger filled disc.
+    ctx.strokeStyle = HALO_COLOR;
+    sch.junctions.forEach((j, i) => {
+      if (!hl(refId('junction', j.uuid, i))) return;
+      const d = j.diameter > 0 ? j.diameter : 0.9 * MM;
+      ctx.lineWidth = shadowWidth;
+      ctx.beginPath();
+      ctx.arc(j.at.x, j.at.y, d / 2, 0, Math.PI * 2);
+      ctx.stroke();
     });
   }
 
-  // Wires and buses (highlighted ones recoloured to the brightened colour).
+  // Wires and buses (highlighted ones recoloured to the brightened colour, full pen width).
   sch.lines.forEach((line, i) => {
     const on = hl(refId('line', line.uuid, i));
     ctx.strokeStyle = on ? theme.netHighlight
@@ -112,13 +134,16 @@ export function renderSchematic(
   });
 
   // Placed symbols.
-  for (const sym of sch.symbols) {
+  sch.symbols.forEach((sym, si) => {
     const lib = libById.get(sym.libId);
     if (lib) {
       const t = symbolTransform(sym.angle, sym.mirror);
       const pins = { numbersHidden: lib.pinNumbersHidden, namesHidden: lib.pinNamesHidden, nameOffset: lib.pinNameOffset };
+      const symId = refId('symbol', sym.uuid, si);
+      let pinIndex = 0;
       for (const unit of lib.units) {
-        if (libUnitMatches(unit, sym.unit, sym.bodyStyle)) drawLibUnit(ctx, unit, sym.at, t, theme, pins);
+        if (libUnitMatches(unit, sym.unit, sym.bodyStyle))
+          pinIndex = drawLibUnit(ctx, unit, sym.at, t, theme, pins, symId, pinIndex, highlight, shadowWidth);
       }
     }
     // Instance fields are stored in absolute schematic coordinates. KiCad's
@@ -133,7 +158,7 @@ export function renderSchematic(
       const drawHoriz = ty1 !== 0 ? !storedHoriz : storedHoriz;
       drawText(ctx, f.value, f.at, f.effects?.fontSize?.[0] ?? 1.27 * MM, color, f.effects?.justify, drawHoriz ? 0 : 90);
     }
-  }
+  });
 
   // Labels and free text.
   for (const l of sch.labels) {
@@ -329,7 +354,11 @@ function drawLibUnit(
   t: Transform,
   theme: Theme,
   pins: PinDisplay,
-): void {
+  symId?: string,
+  pinIndexStart = 0,
+  highlight?: ReadonlySet<string>,
+  shadowWidth = 0,
+): number {
   for (const g of unit.graphics) {
     const lw = g.kind !== 'text' && g.stroke && g.stroke.width > 0 ? g.stroke.width : DEFAULT_LINE_WIDTH;
     const filled = g.kind !== 'text' && g.fill && g.fill.type !== 'none';
@@ -377,26 +406,40 @@ function drawLibUnit(
   const NUM = 1.27 * MM, NAME = 1.27 * MM, MARGIN = 0.25 * MM;
   // External pin decoration radius = number text size / 2 (KiCad externalPinDecoSize).
   const DECO_R = NUM / 2;
+  let pinIndex = pinIndexStart;
   for (const pin of unit.pins) {
+    const idx = pinIndex++;
     if (pin.hidden) continue;
     const endLocal = pinBodyEnd(pin.at, pin.angle, pin.length);
     const a = localToWorld(origin, t, pin.at); // connection point (tip)
     const b = localToWorld(origin, t, endLocal); // body end (root)
-    ctx.strokeStyle = theme.pin;
-    ctx.lineWidth = DEFAULT_LINE_WIDTH;
 
     // Inverted pins draw a negation bubble at the body end (KiCad GRAPHIC_PINSHAPE).
     const inverted = pin.shape === 'inverted' || pin.shape === 'inverted_clock';
-    if (inverted && pin.length > 0) {
-      // Unit vector pointing from the body end outward to the tip.
-      const ox = (a.x - b.x) / pin.length, oy = (a.y - b.y) / pin.length;
-      ctx.beginPath();
-      ctx.arc(b.x + ox * DECO_R, b.y + oy * DECO_R, DECO_R, 0, Math.PI * 2);
-      ctx.stroke();
-      strokeLine(ctx, { x: b.x + ox * DECO_R * 2, y: b.y + oy * DECO_R * 2 }, a);
-    } else {
-      strokeLine(ctx, a, b);
+    const strokePinBody = (): void => {
+      if (inverted && pin.length > 0) {
+        // Unit vector pointing from the body end outward to the tip.
+        const ox = (a.x - b.x) / pin.length, oy = (a.y - b.y) / pin.length;
+        ctx.beginPath();
+        ctx.arc(b.x + ox * DECO_R, b.y + oy * DECO_R, DECO_R, 0, Math.PI * 2);
+        ctx.stroke();
+        strokeLine(ctx, { x: b.x + ox * DECO_R * 2, y: b.y + oy * DECO_R * 2 }, a);
+      } else {
+        strokeLine(ctx, a, b);
+      }
+    };
+
+    // Brightened pin (on the highlighted net): shadow-pass halo behind, then the
+    // pin redrawn in the brightened colour, exactly like the wire/junction pass.
+    const brightened = symId !== undefined && (highlight?.has(`${symId}:pin${idx}`) ?? false);
+    if (brightened) {
+      ctx.strokeStyle = 'rgba(255, 0, 255, 0.15)';
+      ctx.lineWidth = DEFAULT_LINE_WIDTH + shadowWidth;
+      strokePinBody();
     }
+    ctx.strokeStyle = brightened ? '#ff00ff' : theme.pin;
+    ctx.lineWidth = DEFAULT_LINE_WIDTH;
+    strokePinBody();
 
     const dir = pinDir(pin.angle);
     const horiz = dir.y === 0;
@@ -421,6 +464,7 @@ function drawLibUnit(
       }
     }
   }
+  return pinIndex;
 }
 
 // ----- primitives -----------------------------------------------------------
