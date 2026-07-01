@@ -41,15 +41,14 @@ describe('mergeColinearWires (KiCad SchematicCleanUp / MergeOverlap)', () => {
     expect(merged.junctions.length).toBe(0);
   });
 
-  it('keeps a junction and splits wires where a third wire tees in', () => {
-    // A vertical wire ending on the middle of a horizontal wire: the horizontal wire
-    // is split at the tee and a junction dot is added (3 exit angles).
+  it('adds a junction where a wire tees in, keeping the through-wire whole', () => {
+    // A vertical wire ending on the middle of a horizontal wire: KiCad keeps the
+    // horizontal wire as one segment and just adds a junction dot at the tee.
     const sch = addItems({
       lines: [makeWire(at(0, 0), at(20, 0)), makeWire(at(10, 0), at(10, 10))],
     }).apply(EMPTY());
     const out = mergeColinearWires(sch);
-    // Horizontal split into 0-10 and 10-20, plus the vertical tee = 3 wires.
-    expect(out.lines.length).toBe(3);
+    expect(out.lines.length).toBe(2); // through-wire stays whole
     expect(out.junctions.some((j) => j.at.x === mmToIU(10) && j.at.y === 0)).toBe(true);
   });
 
