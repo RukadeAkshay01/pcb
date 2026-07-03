@@ -32,6 +32,8 @@ import type {
   SchField,
   SchJunction,
   SchLabel,
+  SchBusEntry,
+  SchImage,
   SchLine,
   SchNoConnect,
   SchSheet,
@@ -83,7 +85,13 @@ function readStroke(node: SList): Stroke | undefined {
 function readFill(node: SList): Fill | undefined {
   const f = childNamed(node, 'fill');
   if (!f) return undefined;
-  return { type: stringField(f, 'type') ?? 'none' };
+  const fill: { -readonly [K in keyof Fill]: Fill[K] } = { type: stringField(f, 'type') ?? 'none' };
+  const col = childNamed(f, 'color');
+  if (col) {
+    const r = numArg(col, 0) ?? 0, g = numArg(col, 1) ?? 0, b = numArg(col, 2) ?? 0, a = numArg(col, 3) ?? 1;
+    if (r || g || b || a < 1) fill.color = [r, g, b, a];
+  }
+  return fill;
 }
 
 function readEffects(node: SList): TextEffects | undefined {
@@ -410,6 +418,46 @@ function readSheet(node: SList): SchSheet {
   return sheet;
 }
 
+/** `(bus_entry (at x y) (size dx dy) (stroke ..) (uuid ..))` — SCH_BUS_WIRE_ENTRY. */
+function readBusEntry(node: SList): SchBusEntry {
+  const { at } = readAt(node);
+  const sizeNode = childNamed(node, 'size');
+  const entry: { -readonly [K in keyof SchBusEntry]: SchBusEntry[K] } = {
+    at,
+    size: {
+      x: mmToIU(numArg(sizeNode ?? node, 0) ?? 0),
+      y: mmToIU(numArg(sizeNode ?? node, 1) ?? 0),
+    },
+    source: node,
+  };
+  const stroke = readStroke(node);
+  if (stroke) entry.stroke = stroke;
+  const uuid = stringField(node, 'uuid');
+  if (uuid) entry.uuid = uuid;
+  return entry;
+}
+
+/** `(image (at x y) [(scale s)] (data "b64" "b64" ...))` — SCH_BITMAP, centred at `at`. */
+function readImage(node: SList): SchImage {
+  const { at } = readAt(node);
+  const dataNode = childNamed(node, 'data');
+  let data = '';
+  if (dataNode) {
+    for (const it of dataNode.items.slice(1)) {
+      if (it.kind === 'string' || it.kind === 'atom') data += it.value;
+    }
+  }
+  const img: { -readonly [K in keyof SchImage]: SchImage[K] } = {
+    at,
+    scale: numArg(childNamed(node, 'scale') ?? node, 0) ?? 1,
+    data,
+    source: node,
+  };
+  const uuid = stringField(node, 'uuid');
+  if (uuid) img.uuid = uuid;
+  return img;
+}
+
 function readNoConnect(node: SList): SchNoConnect {
   const { at } = readAt(node);
   const nc: { -readonly [K in keyof SchNoConnect]: SchNoConnect[K] } = { at, source: node };
@@ -486,6 +534,9 @@ export function readSchematic(root: SList): Schematic {
   const noConnects: SchNoConnect[] = [];
   const labels: SchLabel[] = [];
   const sheets: SchSheet[] = [];
+  const busEntries: SchBusEntry[] = [];
+  const images: SchImage[] = [];
+  const graphics: LibGraphic[] = [];
 
   const libSymbolsNode = childNamed(root, 'lib_symbols');
   if (libSymbolsNode) {
@@ -503,6 +554,12 @@ export function readSchematic(root: SList): Schematic {
     else if (name === 'junction') junctions.push(readJunction(item));
     else if (name === 'no_connect') noConnects.push(readNoConnect(item));
     else if (name === 'sheet') sheets.push(readSheet(item));
+    else if (name === 'bus_entry') busEntries.push(readBusEntry(item));
+    else if (name === 'image') images.push(readImage(item));
+    else if (name === 'rectangle' || name === 'circle' || name === 'arc') {
+      const g = readGraphic(item, false); // sheet coordinates: +Y down, no invert
+      if (g) graphics.push(g);
+    }
     else if (LABEL_KINDS[name]) labels.push(readLabel(item, LABEL_KINDS[name]!));
   }
 
@@ -515,6 +572,9 @@ export function readSchematic(root: SList): Schematic {
     noConnects,
     labels,
     sheets,
+    busEntries,
+    images,
+    graphics,
     source: root,
   };
   const generator = stringField(root, 'generator');

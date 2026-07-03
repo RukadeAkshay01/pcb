@@ -11,9 +11,10 @@ import { buildMenus, TOOL_HOTKEYS } from './ui/menus.js';
 import { SymbolChooser } from './components/SymbolChooser.js';
 import { HomePage } from './HomePage.js';
 import './ui/shell.css';
-import sampleText from './sample.kicad_sch?raw';
 
-const PROJECT_NAME = 'RoyalBlue54L-NFC-Antenna';
+// What KiCad writes for File > New Schematic: an empty sheet on A4 paper.
+// Launching the editor without a project starts here (no bundled demo).
+const EMPTY_SCH = '(kicad_sch (version 20231120) (generator "ziroeda") (paper "A4")\n  (lib_symbols)\n)\n';
 
 const RADIO_GROUPS: string[][] = [
   ['unitsInches', 'unitsMils', 'unitsMm'],
@@ -42,13 +43,13 @@ const FILTER_CATS: [string, string][] = [
 /** A file picked from disk for a project open. */
 export interface PickedFile { name: string; text: string }
 
-const DEFAULT_FILE = 'sample.kicad_sch';
+const DEFAULT_FILE = 'untitled.kicad_sch';
 
-function SchematicEditor({ onExitToHome, initialProject }: { onExitToHome: () => void; initialProject?: PickedFile[] | null }): JSX.Element {
+function SchematicEditor({ onExitToHome, initialProject, initialFile }: { onExitToHome: () => void; initialProject?: PickedFile[] | null; initialFile?: string | null }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const initial = useMemo<Schematic | null>(() => {
     try {
-      return readSchematic(parse(sampleText));
+      return { ...readSchematic(parse(EMPTY_SCH)), fileName: DEFAULT_FILE };
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return null;
@@ -217,7 +218,7 @@ function SchematicEditor({ onExitToHome, initialProject }: { onExitToHome: () =>
 
   // Open a whole KiCad project: parse every .kicad_sch, find the root (the
   // .kicad_pro's schematic, else the sheet nothing references), and show it.
-  const loadProject = useCallback((files: PickedFile[]) => {
+  const loadProject = useCallback((files: PickedFile[], startFile?: string) => {
     const docs = new Map<string, Schematic>();
     const problems: string[] = [];
     let proName: string | undefined;
@@ -236,23 +237,26 @@ function SchematicEditor({ onExitToHome, initialProject }: { onExitToHome: () =>
       return;
     }
     const root = findRootFile(docs, proName);
-    const wantRoot = proName?.replace(/\.kicad_pro$/i, '.kicad_sch');
-    if (wantRoot && !docs.has(wantRoot))
-      problems.push(`root schematic ${wantRoot} is not in the selection — opened ${root} instead`);
     project.current = { docs, root };
-    histories.current = new Map([[root, new History()]]);
-    history.current = histories.current.get(root)!;
-    setCurrentFile(root);
-    setDoc(docs.get(root)!);
+    // Home-page tree clicks land on the clicked sheet, else the root.
+    const startBase = startFile?.split('/').pop()?.split('\\').pop();
+    const start = startBase && docs.has(startBase) ? startBase : root;
+    const wantRoot = proName?.replace(/\.kicad_pro$/i, '.kicad_sch');
+    if (wantRoot && !docs.has(wantRoot) && start === root)
+      problems.push(`root schematic ${wantRoot} is not in the selection — opened ${root} instead`);
+    histories.current = new Map([[start, new History()]]);
+    history.current = histories.current.get(start)!;
+    setCurrentFile(start);
+    setDoc(docs.get(start)!);
     resetTransient();
-    setFileName(root);
+    setFileName(start);
     setError(problems.length ? `Some sheets failed to load: ${problems.join('; ')}` : null);
     requestAnimationFrame(() => controller.current?.zoomToFit());
   }, [resetTransient]);
 
   // A project handed over from the home page's Open Project picker.
   useEffect(() => {
-    if (initialProject && initialProject.length > 0) loadProject(initialProject);
+    if (initialProject && initialProject.length > 0) loadProject(initialProject, initialFile ?? undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProject]);
 
@@ -683,13 +687,13 @@ function renderSheetNode(
 export function App(): JSX.Element {
   const [view, setView] = useState<'home' | 'schematic'>('home');
   const [projectFiles, setProjectFiles] = useState<PickedFile[] | null>(null);
+  const [startFile, setStartFile] = useState<string | null>(null);
   return view === 'home' ? (
     <HomePage
-      projectName={PROJECT_NAME}
-      onOpenSchematic={() => { setProjectFiles(null); setView('schematic'); }}
-      onOpenProject={(files) => { setProjectFiles(files); setView('schematic'); }}
+      onOpenSchematic={() => { setProjectFiles(null); setStartFile(null); setView('schematic'); }}
+      onOpenProject={(files, start) => { setProjectFiles(files); setStartFile(start ?? null); setView('schematic'); }}
     />
   ) : (
-    <SchematicEditor onExitToHome={() => setView('home')} initialProject={projectFiles} />
+    <SchematicEditor onExitToHome={() => setView('home')} initialProject={projectFiles} initialFile={startFile} />
   );
 }

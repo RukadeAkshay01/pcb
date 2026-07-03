@@ -48,7 +48,7 @@ export function copySelectionText(sch: Schematic, ids: ReadonlySet<string>): str
   // Sheets are excluded from the clipboard for now: KiCad ships each sheet's
   // screen along on the clipboard (m_supplementaryClipboard), which needs
   // multi-document paste support.
-  const subset: Schematic = { ...sch, symbols, lines, junctions, noConnects, labels, sheets: [], libSymbols: libs };
+  const subset: Schematic = { ...sch, symbols, lines, junctions, noConnects, labels, sheets: [], busEntries: [], images: [], graphics: [], libSymbols: libs };
   const root = writeSchematic(subset);
 
   const parts: string[] = [];

@@ -6,7 +6,7 @@ import {
   type MoveSpec, type EditCommand, type Schematic, type LibSymbol, type Vec2, type Orientation, type TransformOp, type LabelKind, type LabelShape,
   type PastePayload, type ErcViolation,
 } from '@ziroeda/core';
-import { renderSchematic, drawErcMarkers, fitToContent, type Viewport } from '../render/renderer.js';
+import { renderSchematic, drawErcMarkers, fitToContent, setRenderInvalidator, type Viewport } from '../render/renderer.js';
 import { KICAD_CLASSIC } from '../theme.js';
 
 const GRID = 12700; // 1.27 mm (50 mil)
@@ -301,6 +301,11 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
   }, [size, schematic, draw]);
 
   useEffect(() => { draw(); }, [selection, draw]);
+  // Embedded bitmaps decode asynchronously; repaint when one becomes ready.
+  useEffect(() => {
+    setRenderInvalidator(draw);
+    return () => setRenderInvalidator(null);
+  }, [draw]);
   // Cancel an in-progress wire and reset the placement orientation only when the
   // tool actually changes (not on every schematic update, which would break the
   // multi-segment wire chain). When drawWire was just auto-started from a dangling

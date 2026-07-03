@@ -23,6 +23,7 @@ import {
   type Transform,
   type Schematic,
   type SchLabel,
+  type LibGraphic,
   type LibSymbol,
   type LibSymbolUnit,
   type Vec2,
@@ -261,6 +262,34 @@ export function renderSchematic(
     if (line.stroke?.type && line.stroke.type !== 'default' && line.stroke.type !== 'solid') ctx.setLineDash([]);
   });
 
+  // Wire-to-bus entries: a 45-degree stub from `at` to `at + size`, drawn on the
+  // wire layer (SCH_PAINTER::draw(SCH_BUS_ENTRY_BASE): SCH_BUS_WIRE_ENTRY -> LAYER_WIRE).
+  for (const be of sch.busEntries) {
+    const ex = be.at.x + be.size.x, ey = be.at.y + be.size.y;
+    if (!inView(Math.min(be.at.x, ex), Math.min(be.at.y, ey), Math.max(be.at.x, ex), Math.max(be.at.y, ey))) continue;
+    ctx.strokeStyle = theme.wire;
+    ctx.lineWidth = be.stroke && be.stroke.width > 0 ? be.stroke.width : DEFAULT_LINE_WIDTH;
+    ctx.beginPath();
+    ctx.moveTo(be.at.x, be.at.y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+
+  // Sheet-level graphic shapes (rectangle/circle/arc on the notes layer): the
+  // item's own stroke colour/dash, else LAYER_NOTES; colour fills honoured.
+  for (const g of sch.graphics) drawSheetGraphic(ctx, g, theme);
+
+  // Embedded bitmaps (SCH_BITMAP): centred at `at`, sized pixels x 254000/300 IU
+  // (BITMAP_BASE m_pixelSizeIu for 300 ppi) x the item's scale.
+  for (const im of sch.images) {
+    const entry = imageFor(im);
+    if (!entry) continue;
+    const w = entry.img.naturalWidth * IU_PER_PIXEL * im.scale;
+    const h = entry.img.naturalHeight * IU_PER_PIXEL * im.scale;
+    if (!inView(im.at.x - w / 2, im.at.y - h / 2, im.at.x + w / 2, im.at.y + h / 2)) continue;
+    ctx.drawImage(entry.img, im.at.x - w / 2, im.at.y - h / 2, w, h);
+  }
+
   // Junctions (recoloured when on the highlighted net).
   sch.junctions.forEach((j, i) => {
     if (!inView(j.at.x, j.at.y, j.at.x, j.at.y)) return;
@@ -383,6 +412,77 @@ export function renderSchematic(
       ctx.stroke();
     }
   }
+}
+
+/** Draw one sheet-level graphic shape (notes layer). */
+function drawSheetGraphic(ctx: CanvasRenderingContext2D, g: LibGraphic, theme: Theme): void {
+  if (g.kind === 'text') return; // free text arrives via labels, not graphics
+  const stroke = g.stroke;
+  const width = stroke && stroke.width > 0 ? stroke.width : DEFAULT_LINE_WIDTH;
+  const color = stroke?.color ? cssColor(stroke.color) : theme.noteLine;
+  const fill = g.fill?.type === 'color' && g.fill.color ? cssColor(g.fill.color) : null;
+
+  // Cheap culling per shape.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const inc = (p: Vec2): void => {
+    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+  };
+  if (g.kind === 'rectangle') { inc(g.start); inc(g.end); }
+  else if (g.kind === 'circle') { inc({ x: g.center.x - g.radius, y: g.center.y - g.radius }); inc({ x: g.center.x + g.radius, y: g.center.y + g.radius }); }
+  else if (g.kind === 'arc') { inc(g.start); inc(g.mid); inc(g.end); }
+  else if (g.kind === 'polyline') g.points.forEach(inc);
+  if (!inView(minX, minY, maxX, maxY)) return;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  setDash(ctx, stroke?.type, width);
+  if (fill) ctx.fillStyle = fill;
+  if (g.kind === 'arc') {
+    // drawArc manages its own path (and fills the segment when asked).
+    if (fill) drawArc(ctx, g.start, g.mid, g.end, true);
+    else drawArc(ctx, g.start, g.mid, g.end);
+  } else {
+    ctx.beginPath();
+    if (g.kind === 'rectangle') {
+      ctx.rect(Math.min(g.start.x, g.end.x), Math.min(g.start.y, g.end.y), Math.abs(g.end.x - g.start.x), Math.abs(g.end.y - g.start.y));
+    } else if (g.kind === 'circle') {
+      ctx.arc(g.center.x, g.center.y, g.radius, 0, Math.PI * 2);
+    } else {
+      g.points.forEach((p: Vec2, i: number) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    }
+    if (fill) ctx.fill();
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+// ----- embedded bitmaps -------------------------------------------------------
+
+// BITMAP_BASE: m_pixelSizeIu = 254000 / ppi with the default 300 ppi.
+const IU_PER_PIXEL = 254000 / 300;
+
+interface ImageEntry { img: HTMLImageElement; ready: boolean }
+const g_images = new Map<string, ImageEntry>();
+let g_invalidate: (() => void) | null = null;
+
+/** The canvas registers its redraw here so images repaint once they decode. */
+export function setRenderInvalidator(fn: (() => void) | null): void {
+  g_invalidate = fn;
+}
+
+function imageFor(im: { data: string; uuid?: string }): ImageEntry | null {
+  if (typeof Image === 'undefined' || im.data === '') return null;
+  const key = im.uuid ?? im.data.slice(0, 64);
+  let entry = g_images.get(key);
+  if (!entry) {
+    const img = new Image();
+    entry = { img, ready: false };
+    img.onload = () => { entry!.ready = true; g_invalidate?.(); };
+    img.src = `data:image/png;base64,${im.data}`;
+    g_images.set(key, entry);
+  }
+  return entry.ready ? entry : null;
 }
 
 // KiCad's TARGET_PIN_RADIUS is 15 mil, but that reads visually large here; use a
@@ -927,23 +1027,9 @@ function drawText(
   const cos = Math.cos(-a), sin = Math.sin(-a);
   const placeAt = (x: number, y: number): Vec2 => ({ x: at.x + x * cos - y * sin, y: at.y + x * sin + y * cos });
 
-  // Below a few screen pixels, stroke glyphs blur into an unreadable blob (and are
-  // slow); KiCad switches to a bitmap/outline. We draw a light bar of the text's
-  // footprint instead — cheap, declutters the overview. Real glyphs above threshold.
-  if (heightIU * g_scale < 6) {
-    const w = measureText(text, heightIU);
-    const offX = right ? -w : left ? 0 : -w / 2;
-    const offY = top ? cap : bottom ? 0 : cap / 2;
-    const barTop = offY - cap * 0.72, barH = cap * 0.62; // roughly the x-to-cap band
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.55;
-    ctx.beginPath();
-    const c0 = placeAt(offX, barTop), c1 = placeAt(offX + w, barTop), c2 = placeAt(offX + w, barTop + barH), c3 = placeAt(offX, barTop + barH);
-    ctx.moveTo(c0.x, c0.y); ctx.lineTo(c1.x, c1.y); ctx.lineTo(c2.x, c2.y); ctx.lineTo(c3.x, c3.y); ctx.closePath();
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    return;
-  }
+  // Real glyphs at every zoom (KiCad keeps stroking text however small); below
+  // ~0.6 screen px a run is sub-pixel noise, so it is skipped entirely.
+  if (heightIU * g_scale < 0.6) return;
 
   // KiCad strokes schematic text with the Newstroke font. The glyph run is built
   // once into a Path2D (baseline-left origin, italic shear baked in) and cached

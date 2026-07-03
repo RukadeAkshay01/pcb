@@ -32,9 +32,11 @@ export interface Stroke {
   readonly color?: readonly [number, number, number, number];
 }
 
-/** Fill, matching KiCad's `(fill (type ..))`: none | outline | background | color. */
+/** Fill, matching KiCad's `(fill (type ..) [(color ..)])`: none | outline | background | color. */
 export interface Fill {
   readonly type: string;
+  /** Explicit fill colour [r,g,b,a] when type is `color`. */
+  readonly color?: readonly [number, number, number, number];
 }
 
 /** Text rendering attributes, matching KiCad's `(effects (font ..) (justify ..) hide)`. */
@@ -181,6 +183,26 @@ export interface SchNoConnect {
   readonly source: SList;
 }
 
+/** A wire-to-bus entry (the 45° stub). Mirrors KiCad `SCH_BUS_WIRE_ENTRY`. */
+export interface SchBusEntry {
+  readonly at: Vec2;
+  /** Signed extent: the entry runs from `at` to `at + size`. */
+  readonly size: Vec2;
+  readonly stroke?: Stroke;
+  readonly uuid?: string;
+  readonly source: SList;
+}
+
+/** An embedded bitmap. Mirrors KiCad `SCH_BITMAP` (position is the image centre). */
+export interface SchImage {
+  readonly at: Vec2;
+  readonly scale: number;
+  /** Base64 PNG payload from `(data ...)`. */
+  readonly data: string;
+  readonly uuid?: string;
+  readonly source: SList;
+}
+
 /** Kinds of text label, matching KiCad tokens. */
 export type LabelKind = 'label' | 'global_label' | 'hierarchical_label' | 'text';
 
@@ -253,6 +275,10 @@ export interface Schematic {
   readonly noConnects: readonly SchNoConnect[];
   readonly labels: readonly SchLabel[];
   readonly sheets: readonly SchSheet[];
+  readonly busEntries: readonly SchBusEntry[];
+  readonly images: readonly SchImage[];
+  /** Sheet-level graphic shapes (rectangle/circle/arc) on the notes layer. */
+  readonly graphics: readonly LibGraphic[];
   /** The root AST node, retained as the lossless source of truth. */
   readonly source: SList;
   /** Display filename (app metadata set on load; not part of the file format). */

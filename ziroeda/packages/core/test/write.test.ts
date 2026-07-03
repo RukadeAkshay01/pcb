@@ -71,3 +71,46 @@ describe('multi-point polyline round-trip', () => {
     expect(re.lines[0]!.points).toEqual(poly.points);
   });
 });
+
+describe('bus entries, images and sheet graphics round-trip', () => {
+  const src = `(kicad_sch (version 20231120) (generator eeschema) (lib_symbols)
+    (bus_entry (at 50.8 25.4) (size 2.54 2.54)
+      (stroke (width 0) (type default)) (uuid aa000000-0000-0000-0000-000000000001))
+    (image (at 100 100) (scale 0.5) (uuid aa000000-0000-0000-0000-000000000002)
+      (data "iVBORw0KGgoAAAANSUhEUg" "AAAAEAAAABCAYAAAAfFcSJ"))
+    (rectangle (start 10 10) (end 30 20)
+      (stroke (width 0.1524) (type solid)) (fill (type none))
+      (uuid aa000000-0000-0000-0000-000000000003)))`;
+
+  it('reads all three item kinds', () => {
+    const sch = readSchematic(parse(src));
+    expect(sch.busEntries.length).toBe(1);
+    expect(sch.busEntries[0]!.size).toEqual({ x: mmToIU(2.54), y: mmToIU(2.54) });
+    expect(sch.images.length).toBe(1);
+    // Multi-string (data ...) chunks are joined into one base64 payload.
+    expect(sch.images[0]!.data).toBe('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ');
+    expect(sch.graphics.length).toBe(1);
+  });
+
+  it('writes them back out with no data loss (bus_entry was silently dropped before)', () => {
+    const sch = readSchematic(parse(src));
+    const re = readSchematic(writeSchematic(sch));
+    expect(re.busEntries.length).toBe(1);
+    expect(re.busEntries[0]!.at).toEqual(sch.busEntries[0]!.at);
+    expect(re.images.length).toBe(1);
+    expect(re.graphics.length).toBe(1);
+    // The untouched items are byte-identical (lossless passthrough).
+    expect(serialize(re.images[0]!.source)).toBe(serialize(sch.images[0]!.source));
+    expect(serialize(re.graphics[0]!.source)).toBe(serialize(sch.graphics[0]!.source));
+  });
+
+  it('writes a moved bus entry at its new position', () => {
+    const sch = readSchematic(parse(src));
+    const moved = {
+      ...sch,
+      busEntries: sch.busEntries.map((b) => ({ ...b, at: { x: b.at.x + mmToIU(2.54), y: b.at.y } })),
+    };
+    const re = readSchematic(writeSchematic(moved));
+    expect(re.busEntries[0]!.at).toEqual({ x: mmToIU(53.34), y: mmToIU(25.4) });
+  });
+});

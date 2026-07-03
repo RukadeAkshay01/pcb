@@ -18,7 +18,7 @@ import { head, isList, list, atom, str, type SList, type SNode } from '../sexpr/
 import { childNamed, numArg } from '../sexpr/query.js';
 import { iuToMM, mmToIU } from '../units.js';
 import { readField } from './read-schematic.js';
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, TextEffects, Vec2 } from './types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, SchBusEntry, TextEffects, Vec2 } from './types.js';
 
 function mm(iu: number): string {
   let s = iuToMM(iu).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -331,6 +331,8 @@ const writeJunction = (j: SchJunction): SList => patchAt(j.source, j.at);
 
 const writeNoConnect = (nc: SchNoConnect): SList => patchAt(nc.source, nc.at);
 
+const writeBusEntry = (be: SchBusEntry): SList => patchAt(be.source, be.at);
+
 /** Patch a sheet: its position, each field, and each pin position (all lossless). */
 function writeSheet(sh: SchSheet): SList {
   let node = patchAt(sh.source, sh.at);
@@ -363,6 +365,7 @@ const STRUCTURAL = new Set([...HEADER_ORDER, 'lib_symbols']);
 const ITEM_HEADS = new Set([
   'symbol', 'wire', 'bus', 'polyline', 'junction', 'no_connect',
   'label', 'global_label', 'hierarchical_label', 'text', 'bus_entry', 'sheet',
+  'image', 'rectangle', 'circle', 'arc',
 ]);
 
 /** Rebuild the `(kicad_sch ...)` root list from the current model. */
@@ -381,8 +384,13 @@ export function writeSchematic(sch: Schematic): SList {
     ...sch.lines.map(writeLine),
     ...sch.junctions.map(writeJunction),
     ...sch.noConnects.map(writeNoConnect),
+    ...sch.busEntries.map(writeBusEntry),
     ...sch.labels.map(writeLabel),
     ...sch.sheets.map(writeSheet),
+    // Images and sheet-level graphic shapes are render-only for now: their source
+    // nodes pass through untouched.
+    ...sch.images.map((im) => im.source),
+    ...sch.graphics.map((g) => g.source),
   );
 
   // Preserve any remaining structural nodes (sheet_instances, embedded_fonts, …).
