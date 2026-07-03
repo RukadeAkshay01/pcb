@@ -18,7 +18,7 @@ import { head, isList, list, atom, str, type SList, type SNode } from '../sexpr/
 import { childNamed, numArg } from '../sexpr/query.js';
 import { iuToMM, mmToIU } from '../units.js';
 import { readField } from './read-schematic.js';
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, TextEffects, Vec2 } from './types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, TextEffects, Vec2 } from './types.js';
 
 function mm(iu: number): string {
   let s = iuToMM(iu).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -331,6 +331,29 @@ const writeJunction = (j: SchJunction): SList => patchAt(j.source, j.at);
 
 const writeNoConnect = (nc: SchNoConnect): SList => patchAt(nc.source, nc.at);
 
+/** Patch a sheet: its position, each field, and each pin position (all lossless). */
+function writeSheet(sh: SchSheet): SList {
+  let node = patchAt(sh.source, sh.at);
+  const byKey = new Map(sh.fields.map((f) => [f.key, f]));
+  let pinIdx = 0;
+  node = {
+    kind: 'list',
+    items: node.items.map((it) => {
+      if (isList(it) && head(it) === 'property') {
+        const key = it.items[1];
+        const f = key && key.kind === 'string' ? byKey.get(key.value) : undefined;
+        return f ? patchProperty(it, f) : it;
+      }
+      if (isList(it) && head(it) === 'pin') {
+        const pin = sh.pins[pinIdx++];
+        return pin ? patchAt(it, pin.at) : it;
+      }
+      return it;
+    }),
+  };
+  return node;
+}
+
 function writeLabel(l: SchLabel): SList {
   return patchAt(setItem(l.source, 1, str(l.text)), l.at);
 }
@@ -339,7 +362,7 @@ const HEADER_ORDER = ['version', 'generator', 'generator_version', 'uuid', 'pape
 const STRUCTURAL = new Set([...HEADER_ORDER, 'lib_symbols']);
 const ITEM_HEADS = new Set([
   'symbol', 'wire', 'bus', 'polyline', 'junction', 'no_connect',
-  'label', 'global_label', 'hierarchical_label', 'text', 'bus_entry',
+  'label', 'global_label', 'hierarchical_label', 'text', 'bus_entry', 'sheet',
 ]);
 
 /** Rebuild the `(kicad_sch ...)` root list from the current model. */
@@ -359,6 +382,7 @@ export function writeSchematic(sch: Schematic): SList {
     ...sch.junctions.map(writeJunction),
     ...sch.noConnects.map(writeNoConnect),
     ...sch.labels.map(writeLabel),
+    ...sch.sheets.map(writeSheet),
   );
 
   // Preserve any remaining structural nodes (sheet_instances, embedded_fonts, …).

@@ -61,6 +61,7 @@ export function danglingPinPositions(sch: Schematic, libById: Map<string, LibSym
   for (const j of sch.junctions) nodePoints.add(key(j.at));
   for (const nc of sch.noConnects) nodePoints.add(key(nc.at)); // an NC flag "connects" the pin
   for (const l of sch.labels) if (l.kind !== 'text') nodePoints.add(key(l.at));
+  for (const sh of sch.sheets) for (const p of sh.pins) nodePoints.add(key(p.at));
 
   const wires = sch.lines.filter((l) => l.kind === 'wire' || l.kind === 'bus');
   for (const w of wires) { nodePoints.add(key(w.start)); nodePoints.add(key(w.end)); }

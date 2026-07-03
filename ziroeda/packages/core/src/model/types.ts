@@ -200,6 +200,34 @@ export interface SchLabel {
   readonly source: SList;
 }
 
+/** A hierarchical sheet pin: the connection port on a sheet's edge. Mirrors KiCad `SCH_SHEET_PIN`. */
+export interface SheetPin {
+  readonly name: string;
+  /** Flag shape: input | output | bidirectional | tri_state | passive. */
+  readonly shape: LabelShape;
+  /** Absolute position on the sheet border. */
+  readonly at: Vec2;
+  /** Side encoding from the file: 0 = right, 90 = top, 180 = left, 270 = bottom. */
+  readonly angle: number;
+  readonly effects?: TextEffects;
+  readonly uuid?: string;
+  readonly source: SList;
+}
+
+/** A hierarchical sub-sheet. Mirrors KiCad `SCH_SHEET`. */
+export interface SchSheet {
+  readonly at: Vec2;
+  readonly size: { readonly w: number; readonly h: number };
+  readonly stroke?: Stroke;
+  /** `(fill (color r g b a))` — the sheet body colour; absent/alpha-0 = unfilled. */
+  readonly fillColor?: readonly [number, number, number, number];
+  /** Fields: at least "Sheetname" and "Sheetfile" (KiCad mandatory sheet fields). */
+  readonly fields: readonly SchField[];
+  readonly pins: readonly SheetPin[];
+  readonly uuid?: string;
+  readonly source: SList;
+}
+
 /** Page/sheet metadata block. */
 export interface TitleBlock {
   readonly title?: string;
@@ -224,6 +252,7 @@ export interface Schematic {
   readonly junctions: readonly SchJunction[];
   readonly noConnects: readonly SchNoConnect[];
   readonly labels: readonly SchLabel[];
+  readonly sheets: readonly SchSheet[];
   /** The root AST node, retained as the lossless source of truth. */
   readonly source: SList;
 }

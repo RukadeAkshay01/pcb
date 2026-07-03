@@ -82,7 +82,7 @@ interface Props {
   /** Switch the active tool (used to auto-start a wire from a dangling pin). */
   onRequestTool?: (id: string) => void;
   /** Double-clicked item (KiCad's Properties action, sch_edit_tool.cpp). */
-  onEditItem?: (id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label') => void;
+  onEditItem?: (id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet') => void;
   /** Box-selection result (KiCad SelectMultiple): replace/add/subtract the ids. */
   onSelectBox?: (ids: ReadonlySet<string>, additive: boolean, subtractive: boolean) => void;
   /** Items being pasted: they follow the cursor until clicked to drop (KiCad's paste-then-move). */
@@ -250,8 +250,19 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     draw();
   }, [draw]);
 
+  // A fit requested before the canvas has been laid out (ResizeObserver hasn't
+  // fired yet, so the canvas still has its default 300x150 size) is deferred
+  // and honoured by the size effect below.
+  const fitPendingRef = useRef(false);
+  const sizedRef = useRef(false);
+
   useImperativeHandle(ref, (): CanvasController => ({
-    zoomToFit: () => { const c = canvasRef.current; if (c) { viewportRef.current = fitToContent(schematic, c.width, c.height); draw(); } },
+    zoomToFit: () => {
+      const c = canvasRef.current;
+      if (!c || !sizedRef.current) { fitPendingRef.current = true; return; }
+      viewportRef.current = fitToContent(schematic, c.width, c.height);
+      draw();
+    },
     zoomIn: () => { const c = canvasRef.current; if (c) zoomAbout(c.width / 2, c.height / 2, 1.25); },
     zoomOut: () => { const c = canvasRef.current; if (c) zoomAbout(c.width / 2, c.height / 2, 0.8); },
     centerOn: (p: Vec2) => {
@@ -281,7 +292,11 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     canvas.height = Math.floor(size.h * r);
     canvas.style.width = `${size.w}px`;
     canvas.style.height = `${size.h}px`;
-    if (!viewportRef.current) viewportRef.current = fitToContent(schematic, canvas.width, canvas.height);
+    sizedRef.current = true;
+    if (!viewportRef.current || fitPendingRef.current) {
+      viewportRef.current = fitToContent(schematic, canvas.width, canvas.height);
+      fitPendingRef.current = false;
+    }
     draw();
   }, [size, schematic, draw]);
 

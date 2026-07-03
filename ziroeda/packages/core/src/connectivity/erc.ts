@@ -143,6 +143,9 @@ export function runErc(sch: Schematic, libById: Map<string, LibSymbol>): ErcViol
   sch.noConnects.forEach((nc, i) => noConnectIds.set(refId('noconnect', nc.uuid, i), nc.at));
   const wireIds = new Set<string>();
   sch.lines.forEach((l, i) => { if (l.kind === 'wire') wireIds.add(refId('line', l.uuid, i)); });
+  // Sheet-pin node ids (`<sheetId>:sheetpin<k>`): they count as connections; nets
+  // crossing the hierarchy are exempt from single-sheet label/unconnected checks.
+  const isSheetPin = (id: string): boolean => id.includes(':sheetpin');
 
   // ----- per-subgraph checks (each computeNetlist net = one graphical subgraph) ---
   for (const net of netlist.nets) {
@@ -171,8 +174,10 @@ export function runErc(sch: Schematic, libById: Map<string, LibSymbol>): ErcViol
     }
 
     // ERCE_PIN_NOT_CONNECTED: a pin with no other connections on its subgraph.
-    // Labels count as connections (they join the net by name); other non-stacked
-    // pins count; a bare stub wire does not (KiCad: wires have driver priority NONE).
+    // Labels and sheet pins count as connections (they join the net by name);
+    // other non-stacked pins count; a bare stub wire does not (KiCad: wires have
+    // driver priority NONE).
+    if (net.items.some(isSheetPin)) continue;
     if (netPins.length > 0 && netLabels.length === 0 && distinctPins.length === 1) {
       const p = distinctPins[0]!;
       if (p.electricalType !== 'no_connect' && p.electricalType !== 'free' && !p.hidden) {
@@ -212,16 +217,17 @@ export function runErc(sch: Schematic, libById: Map<string, LibSymbol>): ErcViol
   }
 
   // ----- name-merged nets (KiCad m_nets: subgraphs grouped by net name) ---------
-  interface NetGroup { pins: PinNode[]; hasNC: boolean; labels: string[] }
+  interface NetGroup { pins: PinNode[]; hasNC: boolean; labels: string[]; hasSheetPin: boolean }
   const groups = new Map<string, NetGroup>();
   for (const net of netlist.nets) {
     let g = groups.get(net.name);
-    if (!g) { g = { pins: [], hasNC: false, labels: [] }; groups.set(net.name, g); }
+    if (!g) { g = { pins: [], hasNC: false, labels: [], hasSheetPin: false }; groups.set(net.name, g); }
     for (const id of net.items) {
       const p = pinById.get(id);
       if (p) g.pins.push(p);
       if (noConnectIds.has(id)) g.hasNC = true;
       if (labelIds.has(id)) g.labels.push(id);
+      if (isSheetPin(id)) g.hasSheetPin = true;
     }
   }
 
@@ -290,7 +296,9 @@ export function runErc(sch: Schematic, libById: Map<string, LibSymbol>): ErcViol
       }
     }
 
-    if (needsDriver && !hasDriver && !group.hasNC) {
+    // Nets crossing the hierarchy through a sheet pin may be driven on the other
+    // side; single-sheet ERC cannot see that, so the driver check stands down.
+    if (needsDriver && !hasDriver && !group.hasNC && !group.hasSheetPin) {
       const code: ErcCode = isPowerNet ? 'power_pin_not_driven' : 'pin_not_driven';
       out.push(violation(code,
         isPowerNet ? 'Input Power pin not driven by any Output Power pins'
@@ -301,7 +309,7 @@ export function runErc(sch: Schematic, libById: Map<string, LibSymbol>): ErcViol
     // ercCheckLabels: labels need pins on their (name-merged) net. Locals and
     // hierarchical labels error with none and warn with exactly one; globals
     // keep KiCad's default of ignoring the single-instance check.
-    if (group.labels.length > 0 && !group.hasNC && gpins.length <= 1) {
+    if (group.labels.length > 0 && !group.hasNC && !group.hasSheetPin && gpins.length <= 1) {
       for (const lid of group.labels) {
         const l = labelIds.get(lid)!;
         if (l.kind === 'global_label' && gpins.length === 1) continue;

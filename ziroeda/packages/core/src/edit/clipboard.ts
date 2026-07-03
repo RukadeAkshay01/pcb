@@ -45,7 +45,10 @@ export function copySelectionText(sch: Schematic, ids: ReadonlySet<string>): str
   const libs = sch.libSymbols.filter((l) => usedLibIds.has(l.libId));
 
   // Round the subset through the writer so item nodes carry current geometry.
-  const subset: Schematic = { ...sch, symbols, lines, junctions, noConnects, labels, libSymbols: libs };
+  // Sheets are excluded from the clipboard for now: KiCad ships each sheet's
+  // screen along on the clipboard (m_supplementaryClipboard), which needs
+  // multi-document paste support.
+  const subset: Schematic = { ...sch, symbols, lines, junctions, noConnects, labels, sheets: [], libSymbols: libs };
   const root = writeSchematic(subset);
 
   const parts: string[] = [];
@@ -154,7 +157,7 @@ export function parsePastedText(text: string, existing: Schematic): PastePayload
 
   // Not schematic data: paste as a text object (KiCad's IO_ERROR fallback).
   const asTextItem = (): PastePayload => ({
-    batch: { symbols: [], lines: [], junctions: [], noConnects: [], labels: [makeLabel('text', text, { x: 0, y: 0 })] },
+    batch: { symbols: [], lines: [], junctions: [], noConnects: [], labels: [makeLabel('text', text, { x: 0, y: 0 })], sheets: [] },
     libs: [],
     refPoint: { x: 0, y: 0 },
   });
@@ -214,7 +217,7 @@ export function parsePastedText(text: string, existing: Schematic): PastePayload
   for (const l of labels) consider(l.at);
 
   return {
-    batch: { symbols, lines, junctions, noConnects, labels },
+    batch: { symbols, lines, junctions, noConnects, labels, sheets: [] },
     libs,
     refPoint: refPoint ?? { x: 0, y: 0 },
   };
@@ -241,6 +244,7 @@ export function translatePayload(p: PastePayload, delta: Vec2): PastePayload {
       junctions: p.batch.junctions.map((j) => ({ ...j, at: mv(j.at) })),
       noConnects: p.batch.noConnects.map((nc) => ({ ...nc, at: mv(nc.at) })),
       labels: p.batch.labels.map((l) => ({ ...l, at: mv(l.at) })),
+      sheets: [],
     },
   };
 }

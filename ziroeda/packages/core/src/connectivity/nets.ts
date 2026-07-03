@@ -177,6 +177,15 @@ export function computeNetlist(sch: Schematic, libById: Map<string, LibSymbol>):
     nodes.push({ id: refId('label', l.uuid, i), points: [l.at], driver: { priority, name: l.text } });
   });
 
+  // Hierarchical sheet pins connect like labels at their point (KiCad driver
+  // priority SHEET_PIN; the pin name names the net within this sheet).
+  sch.sheets.forEach((sh, si) => {
+    const shId = refId('sheet', sh.uuid, si);
+    sh.pins.forEach((p, k) => {
+      nodes.push({ id: `${shId}:sheetpin${k}`, points: [p.at], driver: { priority: Priority.SheetPin, name: p.name } });
+    });
+  });
+
   // No-connect flags join the net at their point (KiCad: SCH_NO_CONNECT is a
   // connectable item; the subgraph carrying one is exempt from unconnected checks).
   sch.noConnects.forEach((nc, i) => {

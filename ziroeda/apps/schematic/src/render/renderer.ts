@@ -270,6 +270,48 @@ export function renderSchematic(
     drawLabel(ctx, l, theme);
   }
 
+  // Hierarchical sheets (SCH_PAINTER::draw(SCH_SHEET)): optional colour fill,
+  // border in the sheet's own stroke colour or LAYER_SHEET, the Sheetname /
+  // Sheetfile fields, and pins drawn exactly as hierarchical labels (the
+  // painter casts SCH_SHEET_PIN to SCH_HIERLABEL) in the LAYER_SHEETLABEL colour.
+  for (const sh of sch.sheets) {
+    const pad = 8 * MM; // fields sit just outside the rectangle
+    if (!inView(sh.at.x - pad, sh.at.y - pad, sh.at.x + sh.size.w + pad, sh.at.y + sh.size.h + pad)) continue;
+    const border = sh.stroke?.color ? cssColor(sh.stroke.color) : theme.sheetBorder;
+    const bw = sh.stroke && sh.stroke.width > 0 ? sh.stroke.width : DEFAULT_LINE_WIDTH;
+    if (sh.fillColor) {
+      ctx.fillStyle = cssColor(sh.fillColor);
+      ctx.fillRect(sh.at.x, sh.at.y, sh.size.w, sh.size.h);
+    }
+    ctx.strokeStyle = border;
+    ctx.lineWidth = bw;
+    ctx.setLineDash([]);
+    ctx.strokeRect(sh.at.x, sh.at.y, sh.size.w, sh.size.h);
+
+    for (const f of sh.fields) {
+      if (!f.at || f.effects?.hidden || f.value === '') continue;
+      // SCH_FIELD::GetShownText prefixes the filename field (sch_field.cpp).
+      const text = f.key === 'Sheetfile' ? `File: ${f.value}` : f.value;
+      const color = f.key === 'Sheetname' ? theme.sheetName
+        : f.key === 'Sheetfile' ? theme.sheetFile : theme.label;
+      const h = f.effects?.fontSize?.[0] ?? 1.27 * MM;
+      drawText(ctx, text, f.at, h, color, f.effects?.justify, (f.angle % 180) === 90 ? 90 : 0,
+        f.effects?.bold, f.effects?.italic);
+    }
+
+    for (const p of sh.pins) {
+      const fake: SchLabel = {
+        kind: 'hierarchical_label', text: p.name, at: p.at,
+        // Sheet-pin angle encodes the side (0=right, 90=top, 180=left, 270=bottom);
+        // the flag orientation comes from angle + justify like a hier label.
+        angle: p.angle === 90 || p.angle === 270 ? 90 : 0,
+        shape: p.shape, source: p.source,
+        ...(p.effects ? { effects: p.effects } : {}),
+      };
+      drawLabel(ctx, fake, { ...theme, hierLabel: theme.sheetLabel });
+    }
+  }
+
   // Dangling-pin targets: KiCad draws an open circle (TARGET_PIN_RADIUS = 15 mil,
   // thickness = penWidth/3, in the pin colour Brightened(0.3)) on every pin with no
   // connection (drawPinDanglingIndicator). Cached by document identity so it isn't
@@ -538,6 +580,14 @@ function drawSelectionShadows(
   sch.labels.forEach((l, i) => {
     if (l.effects?.hidden || !selection.has(refId('label', l.uuid, i))) return;
     drawLabel(ctx, l, theme, { color, width });
+  });
+
+  // Sheets: re-stroke the rectangle wider.
+  sch.sheets.forEach((sh, i) => {
+    if (!selection.has(refId('sheet', sh.uuid, i))) return;
+    const bw = sh.stroke && sh.stroke.width > 0 ? sh.stroke.width : DEFAULT_LINE_WIDTH;
+    ctx.lineWidth = bw + width;
+    ctx.strokeRect(sh.at.x, sh.at.y, sh.size.w, sh.size.h);
   });
 }
 
@@ -932,6 +982,7 @@ export function fitToContent(sch: Schematic, canvasWidth: number, canvasHeight: 
   for (const j of sch.junctions) include(j.at);
   for (const s of sch.symbols) { include(s.at); for (const f of s.fields) if (f.at) include(f.at); }
   for (const l of sch.labels) include(l.at);
+  for (const sh of sch.sheets) { include(sh.at); include({ x: sh.at.x + sh.size.w, y: sh.at.y + sh.size.h }); }
 
   if (!Number.isFinite(minX)) return { scale: 0.02, offsetX: canvasWidth / 2, offsetY: canvasHeight / 2 };
 

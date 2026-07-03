@@ -1,5 +1,8 @@
-import type { JSX } from 'react';
+import { useRef, type JSX } from 'react';
 import './ui/shell.css';
+
+/** A file picked from disk for a project open. */
+export interface PickedHomeFile { name: string; text: string }
 
 // KiCad's own dark-theme icons (GPL), vendored under assets/.
 const TILE_ICONS = import.meta.glob('./assets/launcher/*.svg', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -49,9 +52,36 @@ const TreeIcon = ({ name }: { name: string }): JSX.Element => {
   return url ? <img src={url} alt="" /> : <span style={{ width: 18, height: 18 }} />;
 };
 
-export function HomePage({ projectName, onOpenSchematic }: { projectName: string; onOpenSchematic: () => void }): JSX.Element {
+export function HomePage({ projectName, onOpenSchematic, onOpenProject }: {
+  projectName: string;
+  onOpenSchematic: () => void;
+  onOpenProject?: (files: PickedHomeFile[]) => void;
+}): JSX.Element {
+  const dirInputRef = useRef<HTMLInputElement>(null);
+
+  // Read every picked file (a folder via webkitdirectory, or a multi-select) and
+  // hand the .kicad_pro / .kicad_sch set to the editor as one project.
+  const onPicked = async (list: FileList | null): Promise<void> => {
+    if (!list || list.length === 0) return;
+    const wanted = [...list].filter((f) => /\.(kicad_sch|kicad_pro)$/i.test(f.name));
+    const files = await Promise.all(wanted.map(async (f) => ({
+      name: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+      text: await f.text(),
+    })));
+    if (files.length > 0) onOpenProject?.(files);
+  };
+
   return (
     <div className="ze-app">
+      <input
+        ref={dirInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        // Non-standard but universally supported attribute: pick a whole folder.
+        {...{ webkitdirectory: '' }}
+        onChange={(e) => { void onPicked(e.target.files); e.target.value = ''; }}
+      />
       <div className="ze-menubar">
         {['File', 'Edit', 'View', 'Tools', 'Preferences', 'Help'].map((m) => (
           <div key={m} className="ze-menu">{m}</div>
@@ -65,7 +95,12 @@ export function HomePage({ projectName, onOpenSchematic }: { projectName: string
             t === 'sep' ? (
               <span key={`s${i}`} className="sep" />
             ) : (
-              <button key={t.icon} title={t.title} aria-label={t.title}>
+              <button
+                key={t.icon}
+                title={t.title}
+                aria-label={t.title}
+                onClick={t.icon === 'open_project' ? () => dirInputRef.current?.click() : undefined}
+              >
                 <img src={mgrUrl(t.icon)} alt="" />
               </button>
             ),
@@ -88,6 +123,14 @@ export function HomePage({ projectName, onOpenSchematic }: { projectName: string
             <div className="ze-tree-item" style={{ paddingLeft: 24 }}>
               <TreeIcon name="library" />
               <span>{projectName}.kicad_sym</span>
+            </div>
+            <div
+              className="ze-tree-item"
+              style={{ marginTop: 12, fontWeight: 600 }}
+              onClick={() => dirInputRef.current?.click()}
+              title="Pick your KiCad project folder (.kicad_pro + all .kicad_sch sheets)"
+            >
+              📂 Open KiCad Project…
             </div>
           </div>
         </div>

@@ -115,5 +115,11 @@ export function boxSelect(
       ids.add(refId('label', l.uuid, i));
   });
 
+  sch.sheets.forEach((s, i) => {
+    const box: BBox = { minX: s.at.x, minY: s.at.y, maxX: s.at.x + s.size.w, maxY: s.at.y + s.size.h };
+    if (contained ? boxContains(rect, box) : boxIntersects(rect, box))
+      ids.add(refId('sheet', s.uuid, i));
+  });
+
   return ids;
 }

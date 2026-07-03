@@ -7,7 +7,7 @@
  * tee or a 3+-way meeting, not where two wires merely cross or simply continue.
  */
 
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchNoConnect, SchLabel, LibSymbol, Vec2 } from '../model/types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchNoConnect, SchLabel, SchSheet, LibSymbol, Vec2 } from '../model/types.js';
 import type { Orientation } from '../geom/transform.js';
 import { refId } from './hittest.js';
 import { makeSymbol } from './build.js';
@@ -20,6 +20,7 @@ export interface ItemsBatch {
   junctions?: SchJunction[];
   noConnects?: SchNoConnect[];
   labels?: SchLabel[];
+  sheets?: SchSheet[];
 }
 
 function batchIds(b: ItemsBatch): Set<string> {
@@ -29,6 +30,7 @@ function batchIds(b: ItemsBatch): Set<string> {
   b.junctions?.forEach((j, i) => ids.add(refId('junction', j.uuid, i)));
   b.noConnects?.forEach((nc, i) => ids.add(refId('noconnect', nc.uuid, i)));
   b.labels?.forEach((l, i) => ids.add(refId('label', l.uuid, i)));
+  b.sheets?.forEach((s, i) => ids.add(refId('sheet', s.uuid, i)));
   return ids;
 }
 
@@ -39,6 +41,7 @@ function collectByIds(doc: Schematic, ids: ReadonlySet<string>): ItemsBatch {
     junctions: doc.junctions.filter((j, i) => ids.has(refId('junction', j.uuid, i))),
     noConnects: doc.noConnects.filter((nc, i) => ids.has(refId('noconnect', nc.uuid, i))),
     labels: doc.labels.filter((l, i) => ids.has(refId('label', l.uuid, i))),
+    sheets: doc.sheets.filter((s, i) => ids.has(refId('sheet', s.uuid, i))),
   };
 }
 
@@ -54,6 +57,7 @@ export function addItems(batch: ItemsBatch): EditCommand {
         junctions: batch.junctions?.length ? [...doc.junctions, ...batch.junctions] : doc.junctions,
         noConnects: batch.noConnects?.length ? [...doc.noConnects, ...batch.noConnects] : doc.noConnects,
         labels: batch.labels?.length ? [...doc.labels, ...batch.labels] : doc.labels,
+        sheets: batch.sheets?.length ? [...doc.sheets, ...batch.sheets] : doc.sheets,
       };
     },
     invert(): EditCommand {
@@ -75,6 +79,7 @@ export function deleteByIds(ids: ReadonlySet<string>): EditCommand {
         junctions: doc.junctions.filter((j, i) => !ids.has(refId('junction', j.uuid, i))),
         noConnects: doc.noConnects.filter((nc, i) => !ids.has(refId('noconnect', nc.uuid, i))),
         labels: doc.labels.filter((l, i) => !ids.has(refId('label', l.uuid, i))),
+        sheets: doc.sheets.filter((s, i) => !ids.has(refId('sheet', s.uuid, i))),
       };
     },
     invert(before: Schematic): EditCommand {

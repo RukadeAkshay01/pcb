@@ -7,7 +7,7 @@
  * exact.
  */
 
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchNoConnect, SchField, Vec2 } from '../model/types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchNoConnect, SchSheet, SchField, Vec2 } from '../model/types.js';
 import { refId } from './hittest.js';
 import { makeWireWithUuid } from './build.js';
 import type { MoveSpec, StubWire } from './connect.js';
@@ -26,6 +26,13 @@ const moveLine = (l: SchLine, d: Vec2): SchLine => ({ ...l, start: add(l.start, 
 const moveJunction = (j: SchJunction, d: Vec2): SchJunction => ({ ...j, at: add(j.at, d) });
 const moveNoConnect = (nc: SchNoConnect, d: Vec2): SchNoConnect => ({ ...nc, at: add(nc.at, d) });
 const moveLabel = (l: SchLabel, d: Vec2): SchLabel => ({ ...l, at: add(l.at, d) });
+// A sheet moves as one rigid part: rectangle, fields, and pins (all absolute).
+const moveSheet = (s: SchSheet, d: Vec2): SchSheet => ({
+  ...s,
+  at: add(s.at, d),
+  fields: s.fields.map((f) => moveField(f, d)),
+  pins: s.pins.map((p) => ({ ...p, at: add(p.at, d) })),
+});
 
 /** Create a command that moves every item in `ids` by `delta`. */
 export function moveItems(ids: ReadonlySet<string>, delta: Vec2): EditCommand {
@@ -40,6 +47,7 @@ export function moveItems(ids: ReadonlySet<string>, delta: Vec2): EditCommand {
         junctions: doc.junctions.map((j, i) => (ids.has(refId('junction', j.uuid, i)) ? moveJunction(j, delta) : j)),
         noConnects: doc.noConnects.map((nc, i) => (ids.has(refId('noconnect', nc.uuid, i)) ? moveNoConnect(nc, delta) : nc)),
         labels: doc.labels.map((l, i) => (ids.has(refId('label', l.uuid, i)) ? moveLabel(l, delta) : l)),
+        sheets: doc.sheets.map((s, i) => (ids.has(refId('sheet', s.uuid, i)) ? moveSheet(s, delta) : s)),
       };
     },
     invert(): EditCommand {
@@ -67,6 +75,7 @@ function applyConnectedMove(
     junctions: doc.junctions.map((j, i) => (spec.fullIds.has(refId('junction', j.uuid, i)) ? moveJunction(j, delta) : j)),
     noConnects: doc.noConnects.map((nc, i) => (spec.fullIds.has(refId('noconnect', nc.uuid, i)) ? moveNoConnect(nc, delta) : nc)),
     labels: doc.labels.map((l, i) => (spec.fullIds.has(refId('label', l.uuid, i)) ? moveLabel(l, delta) : l)),
+    sheets: doc.sheets.map((s, i) => (spec.fullIds.has(refId('sheet', s.uuid, i)) ? moveSheet(s, delta) : s)),
     lines: stubs.length ? [...lines, ...stubs] : lines,
   };
 }

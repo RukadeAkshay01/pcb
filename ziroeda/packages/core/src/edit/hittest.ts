@@ -10,7 +10,7 @@ import { contains, inflate, labelBox, symbolBodyBBox } from './bbox.js';
 
 /** A reference to a top-level, selectable schematic item. */
 export interface ItemRef {
-  kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label';
+  kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet';
   /** Stable identity: the item's uuid, or `idx:<n>` when one is absent. */
   id: string;
 }
@@ -71,6 +71,17 @@ export function hitTest(
     const s = sch.symbols[i]!;
     const box = inflate(symbolBodyBBox(s, libById.get(s.libId)), accuracy / 2);
     if (contains(box, p)) return { kind: 'symbol', id: refId('symbol', s.uuid, i) };
+  }
+
+  // Sheets last: their rectangle is large, so smaller items inside win first
+  // (KiCad's SCH_SHEET::HitTest accepts any point in the body box).
+  for (let i = 0; i < sch.sheets.length; i++) {
+    const sh = sch.sheets[i]!;
+    const box = inflate(
+      { minX: sh.at.x, minY: sh.at.y, maxX: sh.at.x + sh.size.w, maxY: sh.at.y + sh.size.h },
+      accuracy,
+    );
+    if (contains(box, p)) return { kind: 'sheet', id: refId('sheet', sh.uuid, i) };
   }
 
   return null;

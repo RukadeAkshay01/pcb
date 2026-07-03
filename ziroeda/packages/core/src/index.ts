@@ -10,6 +10,7 @@ export { parse, serialize } from './sexpr/index.js';
 
 export * as model from './model/index.js';
 export * from './model/index.js';
+export { sheetName, sheetFile, buildSheetTree, findRootFile, type SheetTreeNode } from './model/project.js';
 
 import { writeSchematic as _writeSchematic } from './model/index.js';
 import { serialize as _serialize } from './sexpr/index.js';

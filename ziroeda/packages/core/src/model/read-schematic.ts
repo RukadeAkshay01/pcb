@@ -22,6 +22,7 @@ import {
 import type {
   Fill,
   LabelKind,
+  LabelShape,
   LibGraphic,
   LibPin,
   LibSymbol,
@@ -33,7 +34,9 @@ import type {
   SchLabel,
   SchLine,
   SchNoConnect,
+  SchSheet,
   SchSymbol,
+  SheetPin,
   Stroke,
   TextEffects,
   TitleBlock,
@@ -360,6 +363,53 @@ function readJunction(node: SList): SchJunction {
   return j;
 }
 
+const PIN_SHAPES = ['input', 'output', 'bidirectional', 'tri_state', 'passive'] as const;
+
+/** Parse a sheet pin: `(pin "NAME" input (at x y side) (effects ..) (uuid ..))`. */
+function readSheetPin(node: SList): SheetPin {
+  const { at, angle } = readAt(node);
+  const shapeTok = arg(node, 1);
+  const pin: { -readonly [K in keyof SheetPin]: SheetPin[K] } = {
+    name: arg(node, 0) ?? '',
+    shape: (PIN_SHAPES as readonly string[]).includes(shapeTok ?? '') ? shapeTok as LabelShape : 'input',
+    at,
+    angle,
+    source: node,
+  };
+  const effects = readEffects(node);
+  if (effects) pin.effects = effects;
+  const uuid = stringField(node, 'uuid');
+  if (uuid) pin.uuid = uuid;
+  return pin;
+}
+
+/** Parse a `(sheet ...)`: rectangle + Sheetname/Sheetfile fields + hierarchical pins. */
+function readSheet(node: SList): SchSheet {
+  const { at } = readAt(node);
+  const sizeNode = childNamed(node, 'size');
+  const sheet: { -readonly [K in keyof SchSheet]: SchSheet[K] } = {
+    at,
+    size: {
+      w: mmToIU(numArg(sizeNode ?? node, 0) ?? 0),
+      h: mmToIU(numArg(sizeNode ?? node, 1) ?? 0),
+    },
+    fields: childrenNamed(node, 'property').map((p) => readField(p)),
+    pins: childrenNamed(node, 'pin').map(readSheetPin),
+    source: node,
+  };
+  const stroke = readStroke(node);
+  if (stroke) sheet.stroke = stroke;
+  const fill = childNamed(node, 'fill');
+  const fillCol = fill && childNamed(fill, 'color');
+  if (fillCol) {
+    const r = numArg(fillCol, 0) ?? 0, g = numArg(fillCol, 1) ?? 0, b = numArg(fillCol, 2) ?? 0, a = numArg(fillCol, 3) ?? 0;
+    if (a > 0) sheet.fillColor = [r, g, b, a];
+  }
+  const uuid = stringField(node, 'uuid');
+  if (uuid) sheet.uuid = uuid;
+  return sheet;
+}
+
 function readNoConnect(node: SList): SchNoConnect {
   const { at } = readAt(node);
   const nc: { -readonly [K in keyof SchNoConnect]: SchNoConnect[K] } = { at, source: node };
@@ -435,6 +485,7 @@ export function readSchematic(root: SList): Schematic {
   const junctions: SchJunction[] = [];
   const noConnects: SchNoConnect[] = [];
   const labels: SchLabel[] = [];
+  const sheets: SchSheet[] = [];
 
   const libSymbolsNode = childNamed(root, 'lib_symbols');
   if (libSymbolsNode) {
@@ -451,6 +502,7 @@ export function readSchematic(root: SList): Schematic {
     else if (LINE_KINDS[name]) lines.push(readLine(item, LINE_KINDS[name]!));
     else if (name === 'junction') junctions.push(readJunction(item));
     else if (name === 'no_connect') noConnects.push(readNoConnect(item));
+    else if (name === 'sheet') sheets.push(readSheet(item));
     else if (LABEL_KINDS[name]) labels.push(readLabel(item, LABEL_KINDS[name]!));
   }
 
@@ -462,6 +514,7 @@ export function readSchematic(root: SList): Schematic {
     junctions,
     noConnects,
     labels,
+    sheets,
     source: root,
   };
   const generator = stringField(root, 'generator');

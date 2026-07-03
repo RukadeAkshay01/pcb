@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, withCleanup, refId, editSymbolProperties, copySelectionText, parsePastedText, runErc, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type TransformOp, type LabelKind, type LabelShape, type SymbolEdit, type PastePayload, type ErcViolation } from '@ziroeda/core';
+import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, withCleanup, refId, editSymbolProperties, copySelectionText, parsePastedText, runErc, buildSheetTree, sheetFile, findRootFile, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type TransformOp, type LabelKind, type LabelShape, type SymbolEdit, type PastePayload, type ErcViolation, type SheetTreeNode } from '@ziroeda/core';
 import { SchematicCanvas, type CanvasController, type LineMode, type PendingLabel } from './components/SchematicCanvas.js';
 import { LabelDialog } from './components/LabelDialog.js';
 import { SymbolPropertiesDialog } from './components/SymbolPropertiesDialog.js';
@@ -39,7 +39,12 @@ const FILTER_CATS: [string, string][] = [
   ['text', 'Text'], ['other', 'Other items'],
 ];
 
-function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.Element {
+/** A file picked from disk for a project open. */
+export interface PickedFile { name: string; text: string }
+
+const DEFAULT_FILE = 'sample.kicad_sch';
+
+function SchematicEditor({ onExitToHome, initialProject }: { onExitToHome: () => void; initialProject?: PickedFile[] | null }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const initial = useMemo<Schematic | null>(() => {
     try {
@@ -51,6 +56,17 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
   }, []);
 
   const [doc, setDoc] = useState<Schematic | null>(initial);
+  // Multi-sheet project: every parsed document by basename, the root file, and a
+  // History per sheet (KiCad keeps one undo stack per screen). `doc` is always
+  // the currently-shown sheet; it is written back into `docs` when switching.
+  const project = useRef<{ docs: Map<string, Schematic>; root: string }>({
+    docs: new Map(initial ? [[DEFAULT_FILE, initial]] : []),
+    root: DEFAULT_FILE,
+  });
+  const histories = useRef<Map<string, History>>(new Map());
+  const [currentFile, setCurrentFile] = useState<string>(DEFAULT_FILE);
+  // Register the initial sheet's undo stack so returning to it keeps its history.
+  useEffect(() => { histories.current.set(DEFAULT_FILE, history.current); }, []);
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   // The item whose net is highlighted by the Highlight-Net tool (KiCad's
   // m_highlightedConn). Distinct from selection: plain selection is never a net
@@ -148,11 +164,6 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
   const undo = useCallback(() => setDoc((d) => (d ? history.current.undo(d) ?? d : d)), []);
   const redo = useCallback(() => setDoc((d) => (d ? history.current.redo(d) ?? d : d)), []);
 
-  // KiCad's Properties action: only symbols have a properties dialog so far.
-  const onEditItem = useCallback((id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label') => {
-    if (kind === 'symbol') setPropsTarget(id);
-  }, []);
-
   // Resolve the open dialog's target symbol against the current document.
   const propsSymbol = useMemo(() => {
     if (!doc || propsTarget === null) return null;
@@ -163,18 +174,38 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
     return null;
   }, [doc, propsTarget]);
 
+  // The schematic hierarchy (SCH_SHEET_LIST): rebuilt from the live documents so
+  // sheet edits (adding/renaming sheets) reflect immediately.
+  const sheetTree = useMemo<SheetTreeNode | null>(() => {
+    if (!doc) return null;
+    const docs = new Map(project.current.docs);
+    docs.set(currentFile, doc);
+    return buildSheetTree(docs, project.current.root);
+  }, [doc, currentFile]);
+
   // Load a schematic from raw .kicad_sch text: parse (lossless), fresh history,
   // clear transient state, and fit the view. Embedded lib_symbols render as-is.
+  const resetTransient = useCallback(() => {
+    setSelection(new Set());
+    setHighlightItem(null);
+    setPendingLabel(null);
+    setActiveTool('select');
+    setPlaceLib(null);
+    setPastePending(null);
+    setErcResult(null);
+    setPropsTarget(null);
+  }, []);
+
   const loadText = useCallback((text: string, name?: string) => {
     try {
       const next = readSchematic(parse(text));
-      history.current.clear();
+      const file = name ?? 'untitled.kicad_sch';
+      project.current = { docs: new Map([[file, next]]), root: file };
+      histories.current = new Map([[file, new History()]]);
+      history.current = histories.current.get(file)!;
+      setCurrentFile(file);
       setDoc(next);
-      setSelection(new Set());
-      setHighlightItem(null);
-      setPendingLabel(null);
-      setActiveTool('select');
-      setPlaceLib(null);
+      resetTransient();
       if (name) setFileName(name);
       setError(null);
       // Fit after React commits the new doc to the canvas.
@@ -182,7 +213,76 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [resetTransient]);
+
+  // Open a whole KiCad project: parse every .kicad_sch, find the root (the
+  // .kicad_pro's schematic, else the sheet nothing references), and show it.
+  const loadProject = useCallback((files: PickedFile[]) => {
+    const docs = new Map<string, Schematic>();
+    const problems: string[] = [];
+    let proName: string | undefined;
+    for (const f of files) {
+      const base = f.name.split('/').pop()!.split('\\').pop()!;
+      if (/\.kicad_pro$/i.test(base)) { proName = base; continue; }
+      if (!/\.kicad_sch$/i.test(base)) continue;
+      try {
+        docs.set(base, readSchematic(parse(f.text)));
+      } catch (e) {
+        problems.push(`${base}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (docs.size === 0) {
+      setError(problems[0] ?? 'No .kicad_sch files in the selection');
+      return;
+    }
+    const root = findRootFile(docs, proName);
+    project.current = { docs, root };
+    histories.current = new Map([[root, new History()]]);
+    history.current = histories.current.get(root)!;
+    setCurrentFile(root);
+    setDoc(docs.get(root)!);
+    resetTransient();
+    setFileName(root);
+    setError(problems.length ? `Some sheets failed to load: ${problems.join('; ')}` : null);
+    requestAnimationFrame(() => controller.current?.zoomToFit());
+  }, [resetTransient]);
+
+  // A project handed over from the home page's Open Project picker.
+  useEffect(() => {
+    if (initialProject && initialProject.length > 0) loadProject(initialProject);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProject]);
+
+  // Switch the visible sheet (KiCad's Enter Sheet / hierarchy navigation): stash
+  // the edited current sheet back into the project, swap in the target document
+  // and its own undo history.
+  const switchSheet = useCallback((file: string) => {
+    if (!doc || file === currentFile) return;
+    const proj = project.current;
+    proj.docs.set(currentFile, doc);
+    const target = proj.docs.get(file);
+    if (!target) { setError(`Sheet file not in project: ${file}`); return; }
+    if (!histories.current.has(file)) histories.current.set(file, new History());
+    history.current = histories.current.get(file)!;
+    setCurrentFile(file);
+    setDoc(target);
+    resetTransient();
+    requestAnimationFrame(() => controller.current?.zoomToFit());
+  }, [doc, currentFile, resetTransient]);
+
+  // KiCad's Properties action: only symbols have a properties dialog so far.
+  const onEditItem = useCallback((id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet') => {
+    if (kind === 'symbol') setPropsTarget(id);
+    // Double-clicking a sheet enters it (KiCad's Enter Sheet).
+    if (kind === 'sheet' && doc) {
+      const idx = doc.sheets.findIndex((sh, i) => refId('sheet', sh.uuid, i) === id);
+      if (idx !== -1) {
+        const file = sheetFile(doc.sheets[idx]!);
+        if (file) switchSheet(file);
+      }
+    }
+  }, [doc, switchSheet]);
+
 
   const openFile = useCallback((file: File) => {
     if (!/\.kicad_sch$/i.test(file.name)) { setError(`Not a .kicad_sch file: ${file.name}`); return; }
@@ -198,12 +298,12 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
       const url = URL.createObjectURL(new Blob([text], { type: 'application/octet-stream' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = fileName ?? `${d.titleBlock?.title ?? 'schematic'}.kicad_sch`;
+      a.download = currentFile !== DEFAULT_FILE ? currentFile : fileName ?? `${d.titleBlock?.title ?? 'schematic'}.kicad_sch`;
       a.click();
       URL.revokeObjectURL(url);
       return d;
     });
-  }, [fileName]);
+  }, [fileName, currentFile]);
 
   // ----- copy / cut / paste / duplicate (SCH_EDITOR_CONTROL port) -------------
   // Copy writes KiCad's clipboard format (lib_symbols + items as S-expressions),
@@ -396,12 +496,19 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
       : <div style={{ padding: 16 }}>Loading…</div>;
   }
 
-  const title = fileName ?? doc.titleBlock?.title ?? 'Root';
+  const title = currentFile !== DEFAULT_FILE ? currentFile : fileName ?? doc.titleBlock?.title ?? 'Root';
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) openFile(file);
+    const files = [...e.dataTransfer.files];
+    if (files.length > 1) {
+      // Several files at once = a project drop: load them all as one hierarchy.
+      Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })))
+        .then(loadProject)
+        .catch((err) => setError(String(err)));
+    } else if (files[0]) {
+      openFile(files[0]);
+    }
   };
 
   return (
@@ -435,7 +542,9 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
           </div>
           <div className="ze-panel grow">
             <div className="ze-panel-header">Schematic Hierarchy</div>
-            <div className="ze-panel-body"><div className="ze-tree-item active">📄 {title} (page 1)</div></div>
+            <div className="ze-panel-body">
+              {sheetTree && renderSheetNode(sheetTree, 0, currentFile, switchSheet)}
+            </div>
           </div>
           <div className="ze-panel">
             <div className="ze-panel-header">Selection Filter</div>
@@ -543,12 +652,41 @@ function SchematicEditor({ onExitToHome }: { onExitToHome: () => void }): JSX.El
   );
 }
 
+/** One row of the hierarchy tree; children indent one level (KiCad's navigator). */
+function renderSheetNode(
+  node: SheetTreeNode,
+  depth: number,
+  currentFile: string,
+  onOpen: (file: string) => void,
+): JSX.Element {
+  return (
+    <div key={`${node.file}:${depth}`}>
+      <div
+        className={`ze-tree-item ${node.file === currentFile ? 'active' : ''}`}
+        style={{ paddingLeft: 8 + depth * 16 }}
+        onClick={() => onOpen(node.file)}
+        title={node.file}
+      >
+        📄 {node.name}
+      </div>
+      {node.children.map((c, i) => (
+        <div key={`${c.file}:${i}`}>{renderSheetNode(c, depth + 1, currentFile, onOpen)}</div>
+      ))}
+    </div>
+  );
+}
+
 /** Top-level app: the KiCad-style project manager, then the schematic editor. */
 export function App(): JSX.Element {
   const [view, setView] = useState<'home' | 'schematic'>('home');
+  const [projectFiles, setProjectFiles] = useState<PickedFile[] | null>(null);
   return view === 'home' ? (
-    <HomePage projectName={PROJECT_NAME} onOpenSchematic={() => setView('schematic')} />
+    <HomePage
+      projectName={PROJECT_NAME}
+      onOpenSchematic={() => { setProjectFiles(null); setView('schematic'); }}
+      onOpenProject={(files) => { setProjectFiles(files); setView('schematic'); }}
+    />
   ) : (
-    <SchematicEditor onExitToHome={() => setView('home')} />
+    <SchematicEditor onExitToHome={() => setView('home')} initialProject={projectFiles} />
   );
 }

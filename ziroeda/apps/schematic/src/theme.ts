@@ -28,6 +28,10 @@ export interface Theme {
   noConnect: string;
   ercError: string;
   ercWarning: string;
+  sheetBorder: string;
+  sheetName: string;
+  sheetFile: string;
+  sheetLabel: string;
 }
 
 export const KICAD_CLASSIC: Theme = {
@@ -53,4 +57,8 @@ export const KICAD_CLASSIC: Theme = {
   noConnect: '#000084', // KiCad LAYER_NOCONNECT rgb(0,0,132)
   ercError: 'rgba(230, 9, 13, 0.8)', // KiCad LAYER_ERC_ERR
   ercWarning: 'rgba(209, 146, 0, 0.8)', // KiCad LAYER_ERC_WARN
+  sheetBorder: '#840000', // KiCad LAYER_SHEET rgb(132,0,0)
+  sheetName: '#006464', // KiCad LAYER_SHEETNAME rgb(0,100,100)
+  sheetFile: '#725600', // KiCad LAYER_SHEETFILENAME rgb(114,86,0)
+  sheetLabel: '#006464', // KiCad LAYER_SHEETLABEL rgb(0,100,100)
 };
