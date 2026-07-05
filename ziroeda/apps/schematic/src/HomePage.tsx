@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { parse, readSchematic, buildSheetTree, findRootFile, type Schematic, type SheetTreeNode } from '@ziroeda/core';
 import { MenuBar, type Menu } from './ui/MenuBar.js';
+import { storageAvailable, listProjects, saveProject, loadProject, deleteProject, type ProjectMeta } from './storage/projectStore.js';
 import './ui/shell.css';
 
 /** A file picked from disk for a project open. */
@@ -56,6 +57,17 @@ const TreeIcon = ({ name }: { name: string }): JSX.Element => {
 
 const basename = (p: string): string => p.split('/').pop()!.split('\\').pop()!;
 
+const fmtBytes = (n: number): string =>
+  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+const fmtWhen = (ms: number): string => {
+  const s = (Date.now() - ms) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
 // What pcbnew writes for File > New Board: default 2-layer stack.
 const EMPTY_PCB = `(kicad_pcb (version 20241229) (generator "ziroeda")
   (general (thickness 1.6) (legacy_teardrops no))
@@ -110,10 +122,22 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
   const filesInputRef = useRef<HTMLInputElement>(null);
   // The picked project's files (shown in the tree until the editor is launched).
   const [picked, setPicked] = useState<PickedHomeFile[] | null>(initialFiles ?? null);
+  // Saved projects (IndexedDB) — the offline half of cloud persistence.
+  const [saved, setSaved] = useState<ProjectMeta[]>([]);
+  const refreshSaved = (): void => { if (storageAvailable()) void listProjects().then(setSaved); };
+  useEffect(refreshSaved, []);
+
+  // Derive a project name from the .kicad_pro (else the root .kicad_sch, else folder).
+  const projectNameOf = (files: PickedHomeFile[]): string => {
+    const pro = files.find((f) => /\.kicad_pro$/i.test(f.name));
+    const src = pro?.name ?? files.find((f) => /\.kicad_sch$/i.test(f.name))?.name ?? files[0]?.name ?? 'Project';
+    return basename(src).replace(/\.(kicad_pro|kicad_sch|kicad_pcb)$/i, '');
+  };
 
   // Read every picked file; all files show in the tree (like KiCad's project
-  // window), but only .kicad_sch/.kicad_pro contents are read.
-  const ingest = async (files: { name: string; textOf: () => Promise<string> }[]): Promise<void> => {
+  // window), but only .kicad_sch/.kicad_pro/.kicad_pcb contents are read. The
+  // project is persisted to IndexedDB so it survives a reload with no login.
+  const ingest = async (files: { name: string; textOf: () => Promise<string> }[], persist = true): Promise<void> => {
     const out: PickedHomeFile[] = [];
     for (const f of files) {
       const base = f.name.split('/').pop()!;
@@ -123,7 +147,34 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
         text: /\.(kicad_sch|kicad_pro|kicad_pcb)$/i.test(base) ? await f.textOf() : '',
       });
     }
-    if (out.length > 0) setPicked(out);
+    if (out.length === 0) return;
+    setPicked(out);
+    if (persist && storageAvailable()) {
+      try {
+        // Store only the files that carry content (the ones we can reopen).
+        const withText = out.filter((f) => f.text !== '');
+        if (withText.length > 0) {
+          const name = projectNameOf(out);
+          // Reuse an existing record of the same name so reopening a folder
+          // updates it rather than piling up duplicates.
+          const existing = (await listProjects()).find((p) => p.name === name);
+          await saveProject(name, withText, existing?.id);
+          refreshSaved();
+        }
+      } catch { /* storage disabled (private mode) — the app still works */ }
+    }
+  };
+
+  // Reopen a project straight from IndexedDB — no folder picker needed.
+  const openStored = async (id: string): Promise<void> => {
+    const loaded = await loadProject(id);
+    if (loaded) setPicked(loaded.files.map((f) => ({ name: f.name, text: f.text })));
+  };
+
+  const removeStored = async (id: string, e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation();
+    await deleteProject(id);
+    refreshSaved();
   };
 
   const onPicked = async (list: FileList | null): Promise<void> => {
@@ -403,6 +454,34 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
 
         {/* launcher tiles */}
         <div className="ze-launchers">
+          {saved.length > 0 && (
+            <div className="ze-recent">
+              <div className="ze-recent-head">Recent Projects</div>
+              <div className="ze-recent-list">
+                {saved.map((p) => (
+                  <div
+                    key={p.id}
+                    className="ze-recent-item"
+                    onClick={() => void openStored(p.id)}
+                    title={`Reopen ${p.name} — saved in this browser`}
+                  >
+                    <TreeIcon name="project_kicad" />
+                    <span className="ze-recent-name">{p.name}</span>
+                    <span className="ze-recent-meta">
+                      {p.fileCount} file{p.fileCount === 1 ? '' : 's'} · {fmtBytes(p.bytes)} · {fmtWhen(p.updatedAt)}
+                    </span>
+                    <button
+                      className="ze-recent-del"
+                      title="Remove from this browser"
+                      onClick={(e) => void removeStored(p.id, e)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {TILES.map((t) => {
             const enabled = t.enabled || t.id === 'pcb';
             const launch = t.id === 'pcb' ? launchPcb : (): void => launchSchematic();

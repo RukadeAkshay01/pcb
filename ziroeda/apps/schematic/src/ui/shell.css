@@ -173,6 +173,20 @@ html, body { background: var(--chrome-bg2); }
 .ze-launcher .name { font-weight: 700; font-size: 15px; }
 .ze-launcher .desc { color: #9a9ca0; font-size: 13px; font-style: italic; margin-top: 1px; }
 .ze-launcher .soon { margin-left: auto; font-size: 11px; color: #7a7c80; align-self: center; }
+
+/* Recent Projects (offline IndexedDB store) */
+.ze-recent { margin-bottom: 14px; max-width: 720px; }
+.ze-recent-head { font-weight: 700; font-size: 13px; color: #9a9ca0; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.ze-recent-list { display: flex; flex-direction: column; gap: 2px; }
+.ze-recent-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.ze-recent-item:hover { background: var(--chrome-hover); }
+.ze-recent-item img { width: 18px; height: 18px; flex: 0 0 auto; }
+.ze-recent-name { font-weight: 600; font-size: 14px; }
+.ze-recent-meta { color: #7a7c80; font-size: 12px; margin-left: 4px; }
+.ze-recent-del { margin-left: auto; visibility: hidden; background: none; border: none; color: #9a9ca0; cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 4px; }
+.ze-recent-item:hover .ze-recent-del { visibility: visible; }
+.ze-recent-del:hover { background: #5a2a2a; color: #fff; }
+
 .ze-home-link { padding: 0 12px; display: flex; align-items: center; cursor: pointer; font-weight: 700; color: #4a86c5; }
 .ze-home-link:hover { background: var(--chrome-hover); }
 
