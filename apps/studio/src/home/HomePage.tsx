@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { parse, readSchematic, buildSheetTree, findRootFile, type Schematic, type SheetTreeNode } from '@ziroeda/core';
 import { MenuBar, type Menu } from '../ui/MenuBar.js';
 import { storageAvailable, listProjects, saveProject, loadProject, deleteProject, type ProjectMeta } from './projectStore.js';
+import { useAuth } from '../auth/AuthProvider.js';
 import '../ui/shell.css';
 
 /** A file picked from disk for a project open. */
@@ -173,6 +174,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
   /** A project already open in the app: keep it in the tree on return to home. */
   initialFiles?: PickedHomeFile[] | null;
 }): JSX.Element {
+  const { session, signOut } = useAuth();
   const dirInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
   // The picked project's files (shown in the tree until the editor is launched).
@@ -467,7 +469,19 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
         onChange={(e) => { void onPicked(e.target.files); e.target.value = ''; }}
       />
 
-      <MenuBar menus={menus} />
+      <MenuBar
+        menus={menus}
+        rightSlot={
+          session ? (
+            <div className="ze-account">
+              <span className="ze-account-email">{session.user.email}</span>
+              <button className="ze-account-signout" onClick={() => void signOut()}>
+                Sign out
+              </button>
+            </div>
+          ) : undefined
+        }
+      />
 
       <div
         className="ze-home-body"

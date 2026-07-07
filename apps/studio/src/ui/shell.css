@@ -370,3 +370,68 @@ html, body { background: var(--chrome-bg2); }
 .ze-erc-footer .tally.err { color: #e6090d; }
 .ze-erc-footer .tally.warn { color: #d19200; }
 .ze-erc-footer .grow { flex: 1; }
+
+/* ---- Auth gate (sign-in / sign-up) ---- */
+.ze-auth {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--chrome-bg2); color: var(--chrome-fg);
+  padding: 24px;
+}
+.ze-auth-splash { font-size: 18px; opacity: 0.85; letter-spacing: 0.2px; }
+.ze-auth-card {
+  width: 340px; max-width: 100%;
+  display: flex; flex-direction: column; gap: 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--chrome-border); border-radius: 10px;
+  padding: 28px 26px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.ze-auth-brand {
+  font-size: 22px; font-weight: 700; letter-spacing: 0.2px;
+  color: var(--chrome-fg);
+}
+.ze-auth-sub { font-size: 13px; color: #b7bcc4; margin-top: -6px; }
+.ze-auth-field { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.ze-auth-field span { color: #b7bcc4; }
+.ze-auth-field input {
+  background: var(--chrome-bg2); color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border); border-radius: 6px;
+  padding: 9px 11px; font: inherit; font-size: 14px; outline: none;
+}
+.ze-auth-field input:focus { border-color: var(--chrome-active-border); }
+.ze-auth-error {
+  background: rgba(230, 9, 13, 0.12); color: #ff8f92;
+  border: 1px solid rgba(230, 9, 13, 0.35); border-radius: 6px;
+  padding: 8px 10px; font-size: 12.5px;
+}
+.ze-auth-submit {
+  margin-top: 4px; padding: 10px 14px;
+  background: var(--chrome-active); color: #fff;
+  border: 1px solid var(--chrome-active-border); border-radius: 6px;
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.ze-auth-submit:hover { background: #1e6bab; }
+.ze-auth-submit:disabled { opacity: 0.6; cursor: default; }
+.ze-auth-toggle { font-size: 12.5px; color: #b7bcc4; text-align: center; }
+.ze-auth-switch {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--chrome-active-border); font: inherit; font-size: inherit;
+  text-decoration: underline;
+}
+.ze-auth-confirm { display: flex; flex-direction: column; gap: 12px; }
+.ze-auth-confirm-title { font-size: 16px; font-weight: 600; }
+.ze-auth-confirm p { margin: 0; font-size: 13px; color: #b7bcc4; line-height: 1.5; }
+
+/* ---- Account chip in the menu bar ---- */
+.ze-account {
+  margin-left: auto; display: flex; align-items: center; gap: 10px;
+  padding-right: 6px;
+}
+.ze-account-email { font-size: 12px; color: #b7bcc4; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ze-account-signout {
+  background: var(--chrome-bg2); color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border); border-radius: 5px;
+  padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.ze-account-signout:hover { background: var(--chrome-hover); }

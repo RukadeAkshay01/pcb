@@ -18,7 +18,15 @@ export interface Menu {
 }
 
 /** A KiCad-style menu bar with click-to-open dropdowns and hover-to-switch. */
-export function MenuBar({ menus, leftSlot }: { menus: Menu[]; leftSlot?: ReactNode }): JSX.Element {
+export function MenuBar({
+  menus,
+  leftSlot,
+  rightSlot,
+}: {
+  menus: Menu[];
+  leftSlot?: ReactNode;
+  rightSlot?: ReactNode;
+}): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -67,6 +75,7 @@ export function MenuBar({ menus, leftSlot }: { menus: Menu[]; leftSlot?: ReactNo
           )}
         </div>
       ))}
+      {rightSlot}
     </div>
   );
 }

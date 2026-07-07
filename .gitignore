@@ -4,6 +4,11 @@ dist/
 .DS_Store
 coverage/
 
+# Local env files (Supabase keys etc.) — never commit
+.env
+.env.local
+.env.*.local
+
 # Local KiCad source/symbol clones used only as porting references
 kicad-src/
 kicad-symbols-src/
