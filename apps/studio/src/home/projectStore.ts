@@ -4,15 +4,19 @@
  * saved here so they survive reloads with no login and no backend; a cloud
  * sync layer (Supabase) can later mirror these records.
  *
- * KiCad projects are s-expression TEXT, which compresses ~10x, so each file is
- * gzipped (CompressionStream) before storage — the 80 MB Jetson board lands at
- * ~8 MB. gzip is transparent: reads detect the magic bytes and fall back to raw
- * text on browsers without CompressionStream.
+ * Files are stored as raw BYTES, mirroring KiCad's PROJECT_ARCHIVER, which
+ * reads/writes every project file as a byte stream (project_archiver.cpp) so
+ * binary files — 3D models (.step/.wrl), PDFs, images — round-trip exactly, not
+ * just s-expression text. KiCad text compresses ~10x, so each file is gzipped
+ * (CompressionStream) before storage — the 80 MB Jetson board lands at ~8 MB.
+ * gzip is transparent: reads detect the magic bytes and fall back to the raw
+ * bytes on browsers without CompressionStream. A UTF-8 text file's raw bytes
+ * are its encoding, so records written by the older text-based store stay valid.
  */
 
 export interface StoredFile {
   name: string;
-  text: string;
+  bytes: Uint8Array;
 }
 
 export interface ProjectMeta {
@@ -71,19 +75,18 @@ function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBReque
 
 const hasCompression = typeof CompressionStream !== 'undefined';
 
-async function gzip(text: string): Promise<Uint8Array> {
-  const bytes = new TextEncoder().encode(text);
+async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
   if (!hasCompression) return bytes;
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('gzip'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-async function gunzip(data: Uint8Array): Promise<string> {
+async function gunzip(data: Uint8Array): Promise<Uint8Array> {
   // gzip magic 0x1f 0x8b; anything else is stored raw (older browsers).
   const isGz = data.length > 2 && data[0] === 0x1f && data[1] === 0x8b;
-  if (!isGz || typeof DecompressionStream === 'undefined') return new TextDecoder().decode(data);
+  if (!isGz || typeof DecompressionStream === 'undefined') return data;
   const stream = new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+  return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 // ----- public API ------------------------------------------------------------
@@ -97,7 +100,7 @@ export function storageAvailable(): boolean {
 export async function saveProject(name: string, files: StoredFile[], id?: string): Promise<string> {
   const now = Date.now();
   const pid = id ?? (crypto.randomUUID?.() ?? `p${now}-${Math.random().toString(36).slice(2)}`);
-  const gzFiles = await Promise.all(files.map(async (f) => ({ name: f.name, gz: await gzip(f.text) })));
+  const gzFiles = await Promise.all(files.map(async (f) => ({ name: f.name, gz: await gzip(f.bytes) })));
   // Preserve createdAt when updating an existing record.
   let createdAt = now;
   if (id) {
@@ -128,7 +131,7 @@ export async function listProjects(): Promise<ProjectMeta[]> {
 export async function loadProject(id: string): Promise<{ meta: ProjectMeta; files: StoredFile[] } | null> {
   const r = await tx<StoredRecord | undefined>('readonly', (s) => s.get(id));
   if (!r) return null;
-  const files = await Promise.all(r.files.map(async (f) => ({ name: f.name, text: await gunzip(f.gz) })));
+  const files = await Promise.all(r.files.map(async (f) => ({ name: f.name, bytes: await gunzip(f.gz) })));
   return {
     meta: {
       id: r.id,

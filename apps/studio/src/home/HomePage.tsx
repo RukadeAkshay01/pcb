@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
 import { MenuBar, type Menu } from '../ui/MenuBar.js';
 import { storageAvailable, listProjects, saveProject, loadProject, deleteProject, type ProjectMeta } from './projectStore.js';
 import { useAuth } from '../auth/AuthProvider.js';
 import { syncAllProjects, pushProject, deleteCloudProject } from '../cloud/sync.js';
 import '../ui/shell.css';
 
-/** A file picked from disk for a project open. */
-export interface PickedHomeFile { name: string; text: string }
+/** A file picked from disk for a project open. `bytes` is the byte-exact source
+ * of truth (persist/archive, like KiCad's byte-stream archiver); `text` is a
+ * decoded view the editors parse — valid for text files, unused for binaries. */
+export interface PickedHomeFile { name: string; text: string; bytes?: Uint8Array }
+
+const dec = new TextDecoder();
+const enc = new TextEncoder();
 
 // KiCad's own dark-theme icons (GPL), vendored under assets/.
 const TILE_ICONS = import.meta.glob('../assets/launcher/*.svg', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -161,10 +166,11 @@ const newProjectFiles = (name: string): PickedHomeFile[] => {
     crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const rootUuid = uuid();
   const dir = `${name}/`;
+  const mk = (path: string, text: string): PickedHomeFile => ({ name: path, text, bytes: enc.encode(text) });
   return [
-    { name: `${dir}${name}.kicad_pro`, text: projectJson(name, rootUuid) },
-    { name: `${dir}${name}.kicad_sch`, text: emptySch(rootUuid) },
-    { name: `${dir}${name}.kicad_pcb`, text: EMPTY_PCB },
+    mk(`${dir}${name}.kicad_pro`, projectJson(name, rootUuid)),
+    mk(`${dir}${name}.kicad_sch`, emptySch(rootUuid)),
+    mk(`${dir}${name}.kicad_pcb`, EMPTY_PCB),
   ];
 };
 
@@ -309,25 +315,26 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
   // survives a save, archive, and reopen instead of collapsing to sch+pcb. The
   // storage layer gzips text ~10x, so keeping the libs is cheap. The project is
   // persisted to IndexedDB so it survives a reload with no login.
-  const ingest = async (files: { name: string; textOf: () => Promise<string> }[], persist = true): Promise<void> => {
+  const ingest = async (files: { name: string; bytesOf: () => Promise<Uint8Array> }[], persist = true): Promise<void> => {
     const out: PickedHomeFile[] = [];
     for (const f of files) {
       const base = f.name.split('/').pop()!;
       if (base.startsWith('.')) continue;
-      out.push({ name: f.name, text: await f.textOf() });
+      const bytes = await f.bytesOf();
+      out.push({ name: f.name, text: dec.decode(bytes), bytes });
     }
     if (out.length === 0) return;
     setPicked(out);
     if (persist && storageAvailable()) {
       try {
-        // Persist every file we read (empty files carry no content to reopen).
-        const withText = out.filter((f) => f.text !== '');
-        if (withText.length > 0) {
+        // Persist every file's raw bytes (empty files carry nothing to reopen).
+        const withBytes = out.filter((f) => f.bytes && f.bytes.length > 0);
+        if (withBytes.length > 0) {
           const name = projectNameOf(out);
           // Reuse an existing record of the same name so reopening a folder
           // updates it rather than piling up duplicates.
           const existing = (await listProjects()).find((p) => p.name === name);
-          const pid = await saveProject(name, withText, existing?.id);
+          const pid = await saveProject(name, withBytes.map((f) => ({ name: f.name, bytes: f.bytes! })), existing?.id);
           refreshSaved();
           // Mirror to the cloud when signed in (best-effort, non-blocking).
           if (userId) void pushProject(userId, pid).catch((e) => console.warn('Cloud push failed:', e));
@@ -351,7 +358,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
       try {
         // Reuse an existing record of the same name (overwrite, don't duplicate).
         const existing = (await listProjects()).find((p) => p.name === name);
-        const pid = await saveProject(name, files, existing?.id);
+        const pid = await saveProject(name, files.map((f) => ({ name: f.name, bytes: f.bytes! })), existing?.id);
         refreshSaved();
         if (userId) void pushProject(userId, pid).catch((e) => console.warn('Cloud push failed:', e));
       } catch { /* storage disabled (private mode) — the app still works */ }
@@ -361,7 +368,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
   // Reopen a project straight from IndexedDB — no folder picker needed.
   const openStored = async (id: string): Promise<void> => {
     const loaded = await loadProject(id);
-    if (loaded) setPicked(loaded.files.map((f) => ({ name: f.name, text: f.text })));
+    if (loaded) setPicked(loaded.files.map((f) => ({ name: f.name, text: dec.decode(f.bytes), bytes: f.bytes })));
   };
 
   const removeStored = async (id: string, e: React.MouseEvent): Promise<void> => {
@@ -375,7 +382,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
     if (!list || list.length === 0) return;
     await ingest([...list].map((f) => ({
       name: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
-      textOf: () => f.text(),
+      bytesOf: async () => new Uint8Array(await f.arrayBuffer()),
     })));
   };
 
@@ -393,12 +400,12 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
     if (w.showDirectoryPicker) {
       try {
         const dir = await w.showDirectoryPicker();
-        const files: { name: string; textOf: () => Promise<string> }[] = [];
+        const files: { name: string; bytesOf: () => Promise<Uint8Array> }[] = [];
         // Recurse so footprint/3D-model subfolders (CM5IO.pretty, 3d_lib …)
         // populate the directory tree, not just the top level.
         const walkHandle = async (handle: DirHandle, prefix: string, depth: number): Promise<void> => {
           for await (const entry of handle.values()) {
-            if (entry.kind === 'file') files.push({ name: prefix + entry.name, textOf: async () => (await entry.getFile()).text() });
+            if (entry.kind === 'file') files.push({ name: prefix + entry.name, bytesOf: async () => new Uint8Array(await (await entry.getFile()).arrayBuffer()) });
             else if (entry.kind === 'directory' && depth < 6) await walkHandle(entry, `${prefix}${entry.name}/`, depth + 1);
           }
         };
@@ -428,12 +435,12 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
       }, () => res(all));
       next();
     });
-    const files: { name: string; textOf: () => Promise<string> }[] = [];
+    const files: { name: string; bytesOf: () => Promise<Uint8Array> }[] = [];
     // Keep the relative path (prefix) so the directory tree reconstructs folders.
     const walk = async (entry: Entry, prefix: string, depth: number): Promise<void> => {
       if (entry.isFile) {
         const file = await new Promise<File>((res, rej) => entry.file(res, rej)).catch(() => null);
-        if (file) files.push({ name: prefix + file.name, textOf: () => file.text() });
+        if (file) files.push({ name: prefix + file.name, bytesOf: async () => new Uint8Array(await file.arrayBuffer()) });
       } else if (entry.isDirectory && depth < 6) {
         for (const child of await readAll(entry)) await walk(child, `${prefix}${entry.name}/`, depth + 1);
       }
@@ -452,18 +459,18 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
     return p.includes('/') ? p.slice(p.indexOf('/') + 1) : p;
   };
 
-  // Archive Project: KiCad zips the project folder to a .zip. In the browser we
-  // only hold text for the KiCad documents (schematic/pcb/pro), so the archive
-  // contains exactly the reopenable project files, re-nested under a folder
+  // Archive Project: KiCad zips the whole project folder, reading each file as a
+  // raw byte stream (PROJECT_ARCHIVER::Archive). We do the same — zip every
+  // file's bytes byte-exact (so binaries survive), re-nested under a folder
   // named for the project (so it unzips the way KiCad expects).
   const archiveProject = (): void => {
     if (!picked) return;
-    const withText = picked.filter((f) => f.text !== '');
-    if (withText.length === 0) return;
+    const withBytes = picked.filter((f) => f.bytes && f.bytes.length > 0);
+    if (withBytes.length === 0) return;
     const name = projectNameOf(picked);
     const entries: Record<string, Uint8Array> = {};
-    for (const f of withText) entries[`${name}/${relPath(f.name)}`] = strToU8(f.text);
-    const blob = new Blob([zipSync(entries, { level: 0 })], { type: 'application/zip' });
+    for (const f of withBytes) entries[`${name}/${relPath(f.name)}`] = f.bytes!;
+    const blob = new Blob([zipSync(entries, { level: 6 })], { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -474,8 +481,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
 
   // Unarchive Project: read a .zip, expand it in memory, and feed its files
   // through the same ingest path as a folder open (so it lands in the tree and
-  // persists). Directory entries and binaries are handled by ingest, which only
-  // reads text for the KiCad document types.
+  // persists). Entries are raw bytes — byte-exact, like KiCad's Unarchive.
   const onUnarchive = async (list: FileList | null): Promise<void> => {
     const file = list?.[0];
     if (!file) return;
@@ -484,7 +490,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
     catch { return; /* not a valid zip */ }
     const files = Object.entries(entries)
       .filter(([name, data]) => !name.endsWith('/') && data.length > 0)
-      .map(([name, data]) => ({ name, textOf: async () => strFromU8(data) }));
+      .map(([name, data]) => ({ name, bytesOf: async () => data }));
     await ingest(files);
   };
 
