@@ -4,6 +4,7 @@ import { MenuBar, type Menu } from '../ui/MenuBar.js';
 import { storageAvailable, listProjects, saveProject, loadProject, deleteProject, type ProjectMeta } from './projectStore.js';
 import { useAuth } from '../auth/AuthProvider.js';
 import { syncAllProjects, pushProject, deleteCloudProject } from '../cloud/sync.js';
+import { LoadingOverlay, nextPaint } from '../ui/LoadingOverlay.js';
 import '../ui/shell.css';
 
 /** A file picked from disk for a project open. `bytes` is the byte-exact source
@@ -13,11 +14,6 @@ export interface PickedHomeFile { name: string; text: string; bytes?: Uint8Array
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
-
-// Let the browser paint (a loading overlay) before we hog the main thread with
-// file reads + gzip. Two rAFs guarantees a committed frame first.
-const nextPaint = (): Promise<void> =>
-  new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 // KiCad's own dark-theme icons (GPL), vendored under assets/.
 const TILE_ICONS = import.meta.glob('../assets/launcher/*.svg', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
@@ -510,22 +506,28 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
   // raw byte stream (PROJECT_ARCHIVER::Archive). We do the same — zip every
   // file's bytes byte-exact (so binaries survive), re-nested under a folder
   // named for the project (so it unzips the way KiCad expects).
-  const archiveProject = (): void => {
+  const archiveProject = async (): Promise<void> => {
     if (!picked) return;
     // KiCad archives only its allow-listed file types (gerbers/backups/images
     // and other stray files are skipped), reading each as raw bytes.
     const withBytes = picked.filter((f) => f.bytes && f.bytes.length > 0 && inArchiveAllowList(f.name));
     if (withBytes.length === 0) return;
-    const name = projectNameOf(picked);
-    const entries: Record<string, Uint8Array> = {};
-    for (const f of withBytes) entries[`${name}/${relPath(f.name)}`] = f.bytes!;
-    const blob = new Blob([zipSync(entries, { level: 6 })], { type: 'application/zip' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${name}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setLoading('Archiving project…');
+    await nextPaint(); // paint the overlay before zipSync blocks the main thread
+    try {
+      const name = projectNameOf(picked);
+      const entries: Record<string, Uint8Array> = {};
+      for (const f of withBytes) entries[`${name}/${relPath(f.name)}`] = f.bytes!;
+      const blob = new Blob([zipSync(entries, { level: 6 })], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${name}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setLoading(null);
+    }
   };
 
   // Unarchive Project: read a .zip, expand it in memory, and feed its files
@@ -547,7 +549,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
     switch (action) {
       case 'open': void openProjectPicker(); break;
       case 'new': setNewName(''); break;
-      case 'archive': archiveProject(); break;
+      case 'archive': void archiveProject(); break;
       case 'unarchive': zipInputRef.current?.click(); break;
       case 'refresh': refreshSaved(); break;
     }
@@ -667,7 +669,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
         { label: 'Open Project…', icon: 'open', action: () => void openProjectPicker(), shortcut: 'Ctrl+O' },
         { label: 'Select Project Files…', action: () => filesInputRef.current?.click() },
         { sep: true },
-        { label: 'Archive Project…', action: () => archiveProject(), disabled: !picked },
+        { label: 'Archive Project…', action: () => void archiveProject(), disabled: !picked },
         { label: 'Unarchive Project…', action: () => zipInputRef.current?.click() },
         { sep: true },
         { label: 'Close Project', action: () => setPicked(null), disabled: !picked },
@@ -891,16 +893,8 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
         </div>
       )}
 
-      {/* KiCad's "Load Schematic" progress dialog, web-style: a blocking overlay
-          with a spinner so the tree isn't interactable-but-janky mid-load. */}
-      {loading && (
-        <div className="ze-modal-backdrop ze-loading-backdrop">
-          <div className="ze-loading-card">
-            <span className="ze-spinner" />
-            <span>{loading}</span>
-          </div>
-        </div>
-      )}
+      {/* KiCad's "Load Schematic" progress dialog, web-style. */}
+      <LoadingOverlay label={loading} />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Toolbar } from '../../ui/Toolbar.js';
 import { TOP_TOOLBAR, LEFT_TOOLBAR, RIGHT_TOOLBAR } from '../../ui/toolbars.js';
 import { MenuBar } from '../../ui/MenuBar.js';
 import { buildMenus, TOOL_HOTKEYS } from '../../ui/menus.js';
+import { LoadingOverlay, nextPaint } from '../../ui/LoadingOverlay.js';
 import '../../ui/shell.css';
 
 // What KiCad writes for File > New Schematic: an empty sheet on A4 paper.
@@ -68,6 +69,8 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
   // The active sheet *instance* (KiCad SCH_SHEET_PATH). Distinct from currentFile
   // so two instances of one shared document highlight/navigate independently.
   const [currentPath, setCurrentPath] = useState<string>('/');
+  // KiCad's "Load Schematic" progress: non-null while parsing/saving a project.
+  const [loading, setLoading] = useState<string | null>(null);
   // Register the initial sheet's undo stack so returning to it keeps its history.
   useEffect(() => { histories.current.set(DEFAULT_FILE, history.current); }, []);
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
@@ -199,7 +202,9 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
     setPropsTarget(null);
   }, []);
 
-  const loadText = useCallback((text: string, name?: string) => {
+  const loadText = useCallback(async (text: string, name?: string) => {
+    setLoading('Loading schematic…');
+    await nextPaint();
     try {
       const next = { ...readSchematic(parse(text)), fileName: name ?? 'untitled.kicad_sch' };
       const file = name ?? 'untitled.kicad_sch';
@@ -216,12 +221,17 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
       requestAnimationFrame(() => controller.current?.zoomToFit());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(null);
     }
   }, [resetTransient]);
 
   // Open a whole KiCad project: parse every .kicad_sch, find the root (the
   // .kicad_pro's schematic, else the sheet nothing references), and show it.
-  const loadProject = useCallback((files: PickedFile[], startFile?: string) => {
+  const loadProject = useCallback(async (files: PickedFile[], startFile?: string) => {
+    setLoading('Loading schematic…');
+    await nextPaint(); // paint the overlay before the (synchronous) sheet parse
+    try {
     const docs = new Map<string, Schematic>();
     const problems: string[] = [];
     let proName: string | undefined;
@@ -257,11 +267,14 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
     setFileName(start);
     setError(problems.length ? `Some sheets failed to load: ${problems.join('; ')}` : null);
     requestAnimationFrame(() => controller.current?.zoomToFit());
+    } finally {
+      setLoading(null);
+    }
   }, [resetTransient]);
 
   // A project handed over from the home page's Open Project picker.
   useEffect(() => {
-    if (initialProject && initialProject.length > 0) loadProject(initialProject, initialFile ?? undefined);
+    if (initialProject && initialProject.length > 0) void loadProject(initialProject, initialFile ?? undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProject]);
 
@@ -304,7 +317,7 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
 
   const openFile = useCallback((file: File) => {
     if (!/\.kicad_sch$/i.test(file.name)) { setError(`Not a .kicad_sch file: ${file.name}`); return; }
-    file.text().then((t) => loadText(t, file.name)).catch((e) => setError(String(e)));
+    file.text().then((t) => void loadText(t, file.name)).catch((e) => setError(String(e)));
   }, [loadText]);
 
   const promptOpen = useCallback(() => fileInputRef.current?.click(), []);
@@ -512,7 +525,7 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
   if (!doc) {
     return error
       ? <pre style={{ color: 'crimson', padding: 16 }}>Failed to load schematic: {error}</pre>
-      : <div style={{ padding: 16 }}>Loading…</div>;
+      : <div className="ze-app"><LoadingOverlay label={loading ?? 'Loading schematic…'} /></div>;
   }
 
   const title = currentFile !== DEFAULT_FILE ? currentFile : fileName ?? doc.titleBlock?.title ?? 'Root';
@@ -667,6 +680,8 @@ export function SchematicEditor({ onExitToHome, onShowPcb, initialProject, initi
           onCancel={() => setActiveTool('select')}
         />
       )}
+
+      <LoadingOverlay label={loading} />
     </div>
   );
 }

@@ -629,8 +629,9 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic }: {
             onPointerUp={onPointerUp}
           />
           {!board && !error && (
-            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#ddd' }}>
-              Loading board… (large boards can take a while)
+            <div className="ze-canvas-loading">
+              <span className="ze-spinner" />
+              <span>Loading board… (large boards can take a while)</span>
             </div>
           )}
           {error && (
