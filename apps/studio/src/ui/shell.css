@@ -127,24 +127,23 @@ html, body { background: var(--chrome-bg2); }
 .ze-tree-item:hover { background: var(--chrome-hover); }
 .ze-tree-item.active { background: var(--chrome-active); color: #fff; }
 .ze-tree-item.root { font-weight: 700; color: #fff; }
-/* KiCad's native disclosure triangle: a small filled arrow that rotates from
-   pointing right (collapsed) to down (expanded). */
+/* KiCad's native GTK/Adwaita disclosure arrow: a thin chevron outline (not a
+   filled triangle) that rotates from pointing right (collapsed) to down. */
 .ze-tree-item .twisty { position: relative; width: 12px; height: 12px; flex: 0 0 auto; }
 .ze-tree-item .twisty.expandable::before {
   content: "";
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 0;
-  height: 0;
-  border-style: solid;
-  border-width: 4px 0 4px 6px;
-  border-color: transparent transparent transparent #9aa0a6;
-  transform: translate(-50%, -50%);
-  transition: transform 0.08s ease;
+  width: 5px;
+  height: 5px;
+  border-top: 1.5px solid #b8bcc2;
+  border-right: 1.5px solid #b8bcc2;
+  transform: translate(-65%, -50%) rotate(45deg);
+  transition: transform 0.1s ease;
 }
 .ze-tree-item .twisty.expandable.open::before {
-  transform: translate(-50%, -50%) rotate(90deg);
+  transform: translate(-50%, -70%) rotate(135deg);
 }
 
 .ze-prop-row { display: flex; justify-content: space-between; padding: 3px 2px; border-bottom: 1px solid var(--chrome-border); }
