@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 import { parse, readSchematic, buildSheetTree, findRootFile, type Schematic, type SheetTreeNode } from '@ziroeda/core';
 import { MenuBar, type Menu } from '../ui/MenuBar.js';
 import { storageAvailable, listProjects, saveProject, loadProject, deleteProject, type ProjectMeta } from './projectStore.js';
@@ -34,17 +35,18 @@ const TILES: Tile[] = [
   { id: 'pcm', name: 'Plugin and Content Manager', desc: 'Manage downloadable packages from KiCad and 3rd party repositories' },
 ];
 
-// KiCad project-manager left toolbar (toolbars_kicad_manager.cpp).
-const MGR_TOOLS: ({ icon: string; title: string; action?: 'open' | 'new' } | 'sep')[] = [
+// KiCad project-manager left toolbar (toolbars_kicad_manager.cpp). "Browse
+// Project Files" is dropped: a browser can't open the OS file manager, and the
+// left panel already is the project tree.
+type MgrAction = 'open' | 'new' | 'archive' | 'unarchive' | 'refresh';
+const MGR_TOOLS: ({ icon: string; title: string; action: MgrAction } | 'sep')[] = [
   { icon: 'new_project_from_template', title: 'New Project…', action: 'new' },
   { icon: 'open_project', title: 'Open Project…', action: 'open' },
   'sep',
-  { icon: 'zip', title: 'Archive Project…' },
-  { icon: 'unzip', title: 'Unarchive Project…' },
+  { icon: 'zip', title: 'Archive Project…', action: 'archive' },
+  { icon: 'unzip', title: 'Unarchive Project…', action: 'unarchive' },
   'sep',
-  { icon: 'refresh', title: 'Refresh' },
-  'sep',
-  { icon: 'directory_browser', title: 'Browse Project Files' },
+  { icon: 'refresh', title: 'Refresh', action: 'refresh' },
 ];
 
 const tileIcon = (id: string): JSX.Element => {
@@ -248,6 +250,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
   const { session, signOut } = useAuth();
   const dirInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
   // The picked project's files (shown in the tree until the editor is launched).
   const [picked, setPicked] = useState<PickedHomeFile[] | null>(initialFiles ?? null);
   // Saved projects (IndexedDB) — the offline half of cloud persistence.
@@ -420,6 +423,59 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
     await ingest(files);
   };
 
+  // Path relative to the project's own folder ("proj/proj.kicad_sch" ->
+  // "proj.kicad_sch", "proj/sub/a.kicad_sch" -> "sub/a.kicad_sch").
+  const relPath = (name: string): string => {
+    const p = name.replace(/\\/g, '/');
+    return p.includes('/') ? p.slice(p.indexOf('/') + 1) : p;
+  };
+
+  // Archive Project: KiCad zips the project folder to a .zip. In the browser we
+  // only hold text for the KiCad documents (schematic/pcb/pro), so the archive
+  // contains exactly the reopenable project files, re-nested under a folder
+  // named for the project (so it unzips the way KiCad expects).
+  const archiveProject = (): void => {
+    if (!picked) return;
+    const withText = picked.filter((f) => f.text !== '');
+    if (withText.length === 0) return;
+    const name = projectNameOf(picked);
+    const entries: Record<string, Uint8Array> = {};
+    for (const f of withText) entries[`${name}/${relPath(f.name)}`] = strToU8(f.text);
+    const blob = new Blob([zipSync(entries, { level: 0 })], { type: 'application/zip' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Unarchive Project: read a .zip, expand it in memory, and feed its files
+  // through the same ingest path as a folder open (so it lands in the tree and
+  // persists). Directory entries and binaries are handled by ingest, which only
+  // reads text for the KiCad document types.
+  const onUnarchive = async (list: FileList | null): Promise<void> => {
+    const file = list?.[0];
+    if (!file) return;
+    let entries: Record<string, Uint8Array>;
+    try { entries = unzipSync(new Uint8Array(await file.arrayBuffer())); }
+    catch { return; /* not a valid zip */ }
+    const files = Object.entries(entries)
+      .filter(([name, data]) => !name.endsWith('/') && data.length > 0)
+      .map(([name, data]) => ({ name, textOf: async () => strFromU8(data) }));
+    await ingest(files);
+  };
+
+  const runMgrAction = (action: MgrAction): void => {
+    switch (action) {
+      case 'open': void openProjectPicker(); break;
+      case 'new': setNewName(''); break;
+      case 'archive': archiveProject(); break;
+      case 'unarchive': zipInputRef.current?.click(); break;
+      case 'refresh': refreshSaved(); break;
+    }
+  };
+
   const proFile = useMemo(() => picked?.find((f) => /\.kicad_pro$/i.test(f.name)) ?? null, [picked]);
   const displayName = proFile ? basename(proFile.name).replace(/\.kicad_pro$/i, '') : '';
 
@@ -549,6 +605,9 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
         { label: 'Open Project…', icon: 'open', action: () => void openProjectPicker(), shortcut: 'Ctrl+O' },
         { label: 'Select Project Files…', action: () => filesInputRef.current?.click() },
         { sep: true },
+        { label: 'Archive Project…', action: () => archiveProject(), disabled: !picked },
+        { label: 'Unarchive Project…', action: () => zipInputRef.current?.click() },
+        { sep: true },
         { label: 'Close Project', action: () => setPicked(null), disabled: !picked },
       ],
     },
@@ -578,6 +637,13 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
         accept=".kicad_pro,.kicad_sch,.kicad_pcb,.kicad_dru,.kicad_prl,.kicad_wks,.kicad_sym,.md,.txt"
         style={{ display: 'none' }}
         onChange={(e) => { void onPicked(e.target.files); e.target.value = ''; }}
+      />
+      <input
+        ref={zipInputRef}
+        type="file"
+        accept=".zip"
+        style={{ display: 'none' }}
+        onChange={(e) => { void onUnarchive(e.target.files); e.target.value = ''; }}
       />
 
       <MenuBar
@@ -609,11 +675,8 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, initialFil
                 key={t.icon}
                 title={t.title}
                 aria-label={t.title}
-                onClick={
-                  t.action === 'open' ? () => void openProjectPicker()
-                  : t.action === 'new' ? () => setNewName('')
-                  : undefined
-                }
+                disabled={(t.action === 'archive' || t.action === 'refresh') && !picked}
+                onClick={() => runMgrAction(t.action)}
               >
                 <img src={mgrUrl(t.icon)} alt="" />
               </button>
