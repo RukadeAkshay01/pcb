@@ -132,6 +132,19 @@ export async function listProjects(): Promise<ProjectMeta[]> {
     .sort((a, b) => (b.lastOpenedAt ?? b.updatedAt) - (a.lastOpenedAt ?? a.updatedAt));
 }
 
+/** Autosave: replace only the given files in a project (by name), re-gzipping
+ *  just those and leaving every other file (pcb, models, binaries) untouched. */
+export async function updateProjectFiles(id: string, changed: StoredFile[]): Promise<void> {
+  if (changed.length === 0) return;
+  const r = await tx<StoredRecord | undefined>('readonly', (s) => s.get(id));
+  if (!r) return;
+  const byName = new Map(r.files.map((f) => [f.name, f]));
+  for (const f of changed) byName.set(f.name, { name: f.name, gz: await gzip(f.bytes) });
+  r.files = [...byName.values()];
+  r.updatedAt = Date.now();
+  await tx('readwrite', (s) => s.put(r));
+}
+
 /** Mark a project as just opened (reorders Recent without touching updatedAt,
  *  so it doesn't trigger a needless cloud sync). */
 export async function touchOpened(id: string): Promise<void> {

@@ -4,11 +4,18 @@ import { HomePage } from './home/HomePage.js';
 import { SchematicEditor, type PickedFile } from './editors/schematic/SchematicEditor.js';
 import { PcbEditor } from './editors/pcb/PcbEditor.js';
 import { SymbolEditor } from './editors/symbol/SymbolEditor.js';
-import { storageAvailable, listProjects, loadProject } from './home/projectStore.js';
+import { storageAvailable, listProjects, loadProject, updateProjectFiles } from './home/projectStore.js';
 import { saveSession, loadSession } from './home/session.js';
 import './ui/shell.css';
 
 const dec = new TextDecoder();
+const enc = new TextEncoder();
+
+const projectNameOf = (files: PickedFile[]): string => {
+  const pro = files.find((f) => /\.kicad_pro$/i.test(f.name));
+  const src = pro?.name ?? files.find((f) => /\.kicad_sch$/i.test(f.name))?.name ?? files[0]?.name ?? 'Project';
+  return pcbBasename(src).replace(/\.(kicad_pro|kicad_sch|kicad_pcb)$/i, '');
+};
 
 const pcbBasename = (p: string): string => p.split('/').pop()!.split('\\').pop()!;
 
@@ -33,8 +40,9 @@ export function App(): JSX.Element {
   const [placeRequest, setPlaceRequest] = useState<{ lib: LibSymbol; nonce: number } | null>(null);
   // Restore the last view on reload: reopen the most-recently-opened project
   // (top of Recent) into the saved view, so a refresh doesn't lose your work.
-  // Only block on restore if there's actually a non-home view to restore.
-  const [restoring, setRestoring] = useState(() => { const s = loadSession(); return !!(s && s.view !== 'home'); });
+  // On reload, reopen the most-recently-opened project (top of Recent) — into
+  // the home file manager and, if that's where you were, the editor view too.
+  const [restoring, setRestoring] = useState(() => !!loadSession());
   const restored = useRef(false);
   useEffect(() => {
     if (restored.current) return;
@@ -42,7 +50,7 @@ export function App(): JSX.Element {
     void (async () => {
       try {
         const s = loadSession();
-        if (!s || s.view === 'home' || !storageAvailable()) return;
+        if (!s || !storageAvailable()) return;
         const list = await listProjects();
         const loaded = list[0] ? await loadProject(list[0].id) : null;
         if (!loaded) return;
@@ -63,6 +71,32 @@ export function App(): JSX.Element {
     if (restoring) return;
     saveSession({ view, startFile });
   }, [view, startFile, restoring]);
+
+  // Autosave: the schematic editor hands us its updated sheets (by basename).
+  // Debounce-write just those files back to IndexedDB (preserving the rest), so
+  // a reload restores your edits — without touching projectFiles (that would
+  // remount/reset the live editor). Names come from the open project.
+  const projectFilesRef = useRef(projectFiles);
+  projectFilesRef.current = projectFiles;
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const onProjectChange = useCallback((changed: PickedFile[]) => {
+    const cur = projectFilesRef.current;
+    if (!cur || !storageAvailable()) return;
+    const fullByBase = new Map(cur.map((f) => [pcbBasename(f.name), f.name]));
+    const fullChanged = changed
+      .filter((f) => fullByBase.has(pcbBasename(f.name)))
+      .map((f) => ({ name: fullByBase.get(pcbBasename(f.name))!, bytes: enc.encode(f.text) }));
+    if (fullChanged.length === 0) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const rec = (await listProjects()).find((p) => p.name === projectNameOf(cur));
+          if (rec) await updateProjectFiles(rec.id, fullChanged);
+        } catch { /* storage disabled */ }
+      })();
+    }, 1200);
+  }, []);
 
   const pcbFile = useMemo<PickedFile | null>(
     () => standalonePcb ?? projectFiles?.find((f) => /\.kicad_pcb$/i.test(f.name)) ?? null,
@@ -132,6 +166,7 @@ export function App(): JSX.Element {
             initialProject={projectFiles}
             initialFile={startFile}
             placeRequest={placeRequest}
+            onProjectChange={onProjectChange}
           />
         </div>
       )}

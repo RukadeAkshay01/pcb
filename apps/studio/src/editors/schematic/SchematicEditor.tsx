@@ -45,7 +45,7 @@ export interface PickedFile { name: string; text: string }
 
 const DEFAULT_FILE = 'untitled.kicad_sch';
 
-export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, initialProject, initialFile, placeRequest }: {
+export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, initialProject, initialFile, placeRequest, onProjectChange }: {
   onExitToHome: () => void;
   onShowPcb?: () => void;
   /** Open the Symbol Editor (the top toolbar's `symbolEditor` button). */
@@ -54,6 +54,8 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
   initialFile?: string | null;
   /** A symbol handed over by the Symbol Editor's "Add symbol to schematic": attach it to the cursor. */
   placeRequest?: { lib: LibSymbol; nonce: number } | null;
+  /** Autosave hook: called (debounced) with the serialized sheets after edits. */
+  onProjectChange?: (files: PickedFile[]) => void;
 }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const initial = useMemo<Schematic | null>(() => {
@@ -286,6 +288,23 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
     if (initialProject && initialProject.length > 0) void loadProject(initialProject, initialFile ?? undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProject]);
+
+  // Autosave: once edits settle, serialize the project's sheets and hand them
+  // up (App debounces the write to IndexedDB). Fires on sheet switch/load too,
+  // which just re-saves identical content — harmless.
+  useEffect(() => {
+    if (!doc || !onProjectChange) return;
+    const t = setTimeout(() => {
+      const docs = new Map(project.current.docs);
+      docs.set(currentFile, doc);
+      const files: PickedFile[] = [];
+      for (const [file, d] of docs) {
+        try { files.push({ name: file, text: serializeSchematic(d) }); } catch { /* skip a bad sheet */ }
+      }
+      if (files.length) onProjectChange(files);
+    }, 900);
+    return () => clearTimeout(t);
+  }, [doc, currentFile, onProjectChange]);
 
   // "Add symbol to schematic" from the Symbol Editor: attach the symbol to the
   // cursor exactly as the Place Symbol tool does after its chooser.
