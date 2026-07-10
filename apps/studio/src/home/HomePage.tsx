@@ -5,6 +5,7 @@ import { storageAvailable, listProjects, saveProject, loadProject, deleteProject
 import { useAuth } from '../auth/AuthProvider.js';
 import { syncAllProjects, pushProject, deleteCloudProject } from '../cloud/sync.js';
 import { LoadingOverlay, nextPaint } from '../ui/LoadingOverlay.js';
+import { loadTemplates, createFromTemplate, type TemplateMeta } from './templates.js';
 import '../ui/shell.css';
 
 /** A file picked from disk for a project open. `bytes` is the byte-exact source
@@ -43,9 +44,9 @@ const TILES: Tile[] = [
 // KiCad project-manager left toolbar (toolbars_kicad_manager.cpp). "Browse
 // Project Files" is dropped: a browser can't open the OS file manager, and the
 // left panel already is the project tree.
-type MgrAction = 'open' | 'new' | 'archive' | 'unarchive' | 'refresh';
+type MgrAction = 'open' | 'new' | 'template' | 'archive' | 'unarchive' | 'refresh';
 const MGR_TOOLS: ({ icon: string; title: string; action: MgrAction } | 'sep')[] = [
-  { icon: 'new_project_from_template', title: 'New Project…', action: 'new' },
+  { icon: 'new_project_from_template', title: 'New Project from Template…', action: 'template' },
   { icon: 'open_project', title: 'Open Project…', action: 'open' },
   'sep',
   { icon: 'zip', title: 'Archive Project…', action: 'archive' },
@@ -319,6 +320,12 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
   const [rootOpen, setRootOpen] = useState(true);
   // New Project dialog (KiCad's File > New Project name prompt).
   const [newName, setNewName] = useState<string | null>(null);
+  // New Project from Template (KiCad's DIALOG_TEMPLATE_SELECTOR).
+  const [templates, setTemplates] = useState<TemplateMeta[]>([]);
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplSel, setTplSel] = useState<TemplateMeta | null>(null);
+  const [tplName, setTplName] = useState('');
+  useEffect(() => { void loadTemplates().then(setTemplates); }, []);
   // Project-tree pane width (px), draggable like KiCad's wxAUI sash.
   const [panelWidth, setPanelWidth] = useState(290);
   // Non-null while opening/saving a project — drives KiCad's "Load Schematic"
@@ -406,6 +413,18 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
         if (userId) void pushProject(userId, pid).catch((e) => console.warn('Cloud push failed:', e));
       } catch { /* storage disabled (private mode) — the app still works */ }
     }
+  };
+
+  // File > New Project from Template: copy the chosen template's files (renamed
+  // to the project name, like KiCad's CreateProject) and ingest them.
+  const createFromTpl = async (): Promise<void> => {
+    const name = sanitizeProjectName(tplName);
+    if (!name || !tplSel) return;
+    setTplOpen(false);
+    setExpanded(new Set());
+    const files = await createFromTemplate(tplSel, name);
+    if (files.length === 0) return;
+    await ingest(files.map((f) => ({ name: f.name, bytesOf: async () => f.bytes! })));
   };
 
   // Reopen a project straight from IndexedDB — no folder picker needed.
@@ -557,6 +576,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
     switch (action) {
       case 'open': void openProjectPicker(); break;
       case 'new': setNewName(''); break;
+      case 'template': setTplSel(templates[0] ?? null); setTplName(''); setTplOpen(true); break;
       case 'archive': void archiveProject(); break;
       case 'unarchive': zipInputRef.current?.click(); break;
       case 'refresh': refreshSaved(); break;
@@ -676,6 +696,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
       label: 'File',
       items: [
         { label: 'New Project…', action: () => setNewName(''), shortcut: 'Ctrl+N' },
+        { label: 'New Project from Template…', action: () => { setTplSel(templates[0] ?? null); setTplName(''); setTplOpen(true); }, disabled: templates.length === 0 },
         { label: 'Open Project…', icon: 'open', action: () => void openProjectPicker(), shortcut: 'Ctrl+O' },
         { label: 'Select Project Files…', action: () => filesInputRef.current?.click() },
         { sep: true },
@@ -917,6 +938,62 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
               >
                 Create
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Project from Template (KiCad's DIALOG_TEMPLATE_SELECTOR): pick a
+          template on the left, read its description, name it, and create. */}
+      {tplOpen && (
+        <div className="ze-modal-backdrop" onMouseDown={() => setTplOpen(false)}>
+          <div className="ze-modal ze-template-dialog" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="ze-modal-header">
+              New Project from Template
+              <span className="x" title="Cancel" onClick={() => setTplOpen(false)}>✕</span>
+            </div>
+            <div className="ze-modal-body">
+              <div className="ze-tpl-list">
+                {templates.map((t) => (
+                  <div
+                    key={t.id}
+                    className={`ze-tpl-card${tplSel?.id === t.id ? ' active' : ''}`}
+                    onClick={() => setTplSel(t)}
+                    onDoubleClick={() => { setTplSel(t); if (sanitizeProjectName(tplName)) void createFromTpl(); }}
+                    title={t.title}
+                  >
+                    {t.icon ? <img src={t.icon} alt="" /> : <span className="ze-tpl-noicon" />}
+                    <span>{t.title}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="ze-tpl-detail">
+                {tplSel ? (
+                  <>
+                    <h3>{tplSel.title}</h3>
+                    <p className="ze-tpl-desc">{tplSel.description}</p>
+                  </>
+                ) : (
+                  <p style={{ opacity: 0.6 }}>Select a template.</p>
+                )}
+              </div>
+            </div>
+            <div className="ze-modal-footer" style={{ justifyContent: 'space-between' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>Project name</span>
+                <input
+                  className="ze-search"
+                  autoFocus
+                  placeholder="untitled"
+                  value={tplName}
+                  onChange={(e) => setTplName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void createFromTpl(); else if (e.key === 'Escape') setTplOpen(false); }}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="ze-btn" onClick={() => setTplOpen(false)}>Cancel</button>
+                <button className="ze-btn primary" disabled={!tplSel || !sanitizeProjectName(tplName)} onClick={() => void createFromTpl()}>Create</button>
+              </div>
             </div>
           </div>
         </div>

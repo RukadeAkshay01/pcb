@@ -371,6 +371,17 @@ html, body { background: var(--chrome-bg2); }
 
 /* Symbol Properties dialog (KiCad DIALOG_SYMBOL_PROPERTIES) */
 .ze-modal.ze-props-dialog { width: 1060px; height: auto; max-height: 90vh; }
+
+/* New Project from Template selector (KiCad's DIALOG_TEMPLATE_SELECTOR). */
+.ze-modal.ze-template-dialog { width: 720px; height: 520px; max-width: 94vw; max-height: 88vh; }
+.ze-template-dialog .ze-tpl-list { width: 240px; flex: 0 0 auto; overflow: auto; border-right: 1px solid var(--chrome-border); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.ze-tpl-card { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ze-tpl-card:hover { background: var(--chrome-hover); }
+.ze-tpl-card.active { background: var(--chrome-active); color: #fff; }
+.ze-tpl-card img, .ze-tpl-noicon { width: 40px; height: 40px; object-fit: contain; flex: 0 0 auto; background: rgba(255,255,255,0.12); border-radius: 4px; }
+.ze-tpl-detail { flex: 1; padding: 14px 18px; overflow: auto; min-width: 0; }
+.ze-tpl-detail h3 { margin: 0 0 8px; }
+.ze-tpl-desc { font-size: 13px; line-height: 1.55; opacity: 0.85; white-space: pre-wrap; }
 .ze-props-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
 .ze-props-error { background: #5d2226; border: 1px solid #a2363e; color: #ffd9dc; padding: 6px 10px; border-radius: 4px; font-size: 13px; cursor: pointer; }
 .ze-props-grid-wrap { overflow: auto; max-height: 300px; border: 1px solid var(--chrome-border); border-radius: 4px; }
