@@ -10,7 +10,7 @@
 import { list, atom, str, type SList, type SNode } from '../sexpr/types.js';
 import { iuToMM, mmToIU } from '../units.js';
 import { newUuid } from './build.js';
-import type { LibGraphic, SchBusEntry, SchImage, SchSheet, SchTextBox, SheetPin, SchField, Stroke, Fill, TextEffects, LabelShape, Vec2 } from '../model/types.js';
+import type { LibGraphic, SchBusEntry, SchImage, SchSheet, SchTextBox, SchTable, SchTableCell, SheetPin, SchField, Stroke, Fill, TextEffects, LabelShape, Vec2 } from '../model/types.js';
 
 function mm(iu: number): string {
   let s = iuToMM(iu).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -195,6 +195,76 @@ export function makeTextBox(
     textEffectsNode(effects),
     list(atom('uuid'), str(uuid)));
   return { text, start, end, angle: 0, margins, stroke, fill, effects, excludedFromSim: false, uuid, source };
+}
+
+// ----- table (SCH_TABLE) ---------------------------------------------------------
+
+/** Default table cell size when creating a new table: 25.4 mm wide x 6.35 mm tall. */
+const DEFAULT_COL_WIDTH = mmToIU(25.4);
+const DEFAULT_ROW_HEIGHT = mmToIU(6.35);
+
+/** Build a `(table_cell "text" (at ..)(size ..)(margins ..)(span 1 1)(fill)(effects)(uuid))`. */
+function tableCellNode(text: string, start: Vec2, size: Vec2, margin: number, effects: TextEffects): { node: SList; cell: SchTableCell } {
+  const uuid = newUuid();
+  const node = list(atom('table_cell'), str(text),
+    list(atom('exclude_from_sim'), atom('no')),
+    list(atom('at'), atom(mm(start.x)), atom(mm(start.y)), atom('0')),
+    list(atom('size'), atom(mm(size.x)), atom(mm(size.y))),
+    list(atom('margins'), atom(mm(margin)), atom(mm(margin)), atom(mm(margin)), atom(mm(margin))),
+    list(atom('span'), atom('1'), atom('1')),
+    fillNode({ type: 'none' }),
+    textEffectsNode(effects),
+    list(atom('uuid'), str(uuid)));
+  const cell: SchTableCell = {
+    text, start, end: { x: start.x + size.x, y: start.y + size.y }, colSpan: 1, rowSpan: 1,
+    margins: { left: margin, top: margin, right: margin, bottom: margin }, fill: { type: 'none' }, effects, source: node,
+  };
+  return { node, cell };
+}
+
+/**
+ * Create a table (SCH_TABLE) of `rows` x `cols` empty cells anchored at `at`
+ * (top-left of cell 0,0). Borders and row/column separators are all on, matching
+ * KiCad's SCH_TABLE defaults. `texts`, if given, fill cells row-major.
+ */
+export function makeTable(at: Vec2, rows: number, cols: number, texts: readonly string[] = []): SchTable {
+  const uuid = newUuid();
+  const colWidths = Array.from({ length: cols }, () => DEFAULT_COL_WIDTH);
+  const rowHeights = Array.from({ length: rows }, () => DEFAULT_ROW_HEIGHT);
+  const margin = Math.round(mmToIU(1.27) * 0.75);
+  const effects: TextEffects = { hidden: false, justify: ['left', 'top'] };
+
+  const cellNodes: SList[] = [];
+  const cells: SchTableCell[] = [];
+  let y = at.y;
+  for (let r = 0; r < rows; r++) {
+    let x = at.x;
+    for (let c = 0; c < cols; c++) {
+      const text = texts[r * cols + c] ?? '';
+      const { node, cell } = tableCellNode(text, { x, y }, { x: colWidths[c]!, y: rowHeights[r]! }, margin, effects);
+      cellNodes.push(node);
+      cells.push(cell);
+      x += colWidths[c]!;
+    }
+    y += rowHeights[r]!;
+  }
+
+  const stroke = list(atom('stroke'), list(atom('width'), atom('0')), list(atom('type'), atom('default')));
+  const source = list(atom('table'),
+    list(atom('column_count'), atom(String(cols))),
+    list(atom('border'), list(atom('external'), atom('yes')), list(atom('header'), atom('yes')), stroke),
+    list(atom('separators'), list(atom('rows'), atom('yes')), list(atom('cols'), atom('yes')), stroke),
+    { kind: 'list', items: [atom('column_widths'), ...colWidths.map((w) => atom(mm(w)))] },
+    { kind: 'list', items: [atom('row_heights'), ...rowHeights.map((h) => atom(mm(h)))] },
+    list(atom('uuid'), str(uuid)),
+    { kind: 'list', items: [atom('cells'), ...cellNodes] });
+
+  return {
+    columnCount: cols, colWidths, rowHeights,
+    borderExternal: true, borderHeader: true, borderStroke: { width: 0, type: 'default' },
+    separatorRows: true, separatorCols: true, separatorsStroke: { width: 0, type: 'default' },
+    cells, uuid, source,
+  };
 }
 
 // ----- image (SCH_BITMAP) --------------------------------------------------------

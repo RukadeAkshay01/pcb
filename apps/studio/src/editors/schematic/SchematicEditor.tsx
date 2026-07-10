@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, withCleanup, refId, editSymbolProperties, copySelectionText, parsePastedText, runErc, buildSheetTree, sheetFile, findRootFile, addItems, makeSheet, addSheetPin, replaceSheet, replaceTextBox, makeImage, makeTextBox, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type SheetSide, type TransformOp, type LabelKind, type LabelShape, type SymbolEdit, type PastePayload, type ErcViolation, type SheetTreeNode } from '@ziroeda/core';
+import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, withCleanup, refId, editSymbolProperties, copySelectionText, parsePastedText, runErc, buildSheetTree, sheetFile, findRootFile, addItems, makeSheet, addSheetPin, replaceSheet, replaceTextBox, replaceTable, makeImage, makeTextBox, makeTable, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type SheetSide, type TransformOp, type LabelKind, type LabelShape, type SymbolEdit, type PastePayload, type ErcViolation, type SheetTreeNode } from '@ziroeda/core';
 import { SchematicCanvas, type CanvasController, type LineMode, type PendingLabel } from './components/SchematicCanvas.js';
 import { LabelDialog } from './components/LabelDialog.js';
 import { SymbolPropertiesDialog } from './components/SymbolPropertiesDialog.js';
@@ -109,6 +109,8 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
   const [sheetDraw, setSheetDraw] = useState<{ at: Vec2; size: { w: number; h: number }; name: string; file: string } | null>(null);
   const [sheetPinDraw, setSheetPinDraw] = useState<{ index: number; at: Vec2; side: SheetSide; name: string } | null>(null);
   const [textBoxDraw, setTextBoxDraw] = useState<{ start: Vec2; end: Vec2; text: string; editIndex?: number } | null>(null);
+  const [tableDraw, setTableDraw] = useState<{ rows: number; cols: number } | null>(null);
+  const [tableEdit, setTableEdit] = useState<{ index: number; rows: number; cols: number; texts: string[] } | null>(null);
   const [pendingImage, setPendingImage] = useState<{ data: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [localToggles, setLocalToggles] = useState<Set<string>>(new Set(DEFAULT_TOGGLES));
@@ -373,13 +375,20 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
 
   // KiCad's Properties action: symbols have a full properties dialog; a text box
   // reopens its text editor (double-click = edit).
-  const onEditItem = useCallback((id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox') => {
+  const onEditItem = useCallback((id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox' | 'table') => {
     if (kind === 'symbol') setPropsTarget(id);
     if (kind === 'textbox' && doc) {
       const idx = doc.textBoxes.findIndex((tb, i) => refId('textbox', tb.uuid, i) === id);
       if (idx !== -1) {
         const tb = doc.textBoxes[idx]!;
         setTextBoxDraw({ start: tb.start, end: tb.end, text: tb.text, editIndex: idx });
+      }
+    }
+    if (kind === 'table' && doc) {
+      const idx = doc.tables.findIndex((t, i) => refId('table', t.uuid, i) === id);
+      if (idx !== -1) {
+        const t = doc.tables[idx]!;
+        setTableEdit({ index: idx, rows: t.rowHeights.length, cols: t.columnCount, texts: t.cells.map((c) => c.text) });
       }
     }
     // Double-clicking a sheet enters it (KiCad's Enter Sheet).
@@ -549,8 +558,8 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
     // The Image tool opens a file picker; the image then follows the cursor
     // (SCH_ACTIONS::placeImage).
     if (id === 'image') { imageInputRef.current?.click(); return; }
-    // Tables need an SCH_TABLE model type ZiroEDA does not represent yet.
-    if (id === 'table') { setError('Tables are not supported yet.'); return; }
+    // Table tool: prompt for the grid size, then place the table (SCH_TABLE).
+    if (id === 'table') { setTableDraw({ rows: 2, cols: 2 }); return; }
     setActiveTool(id);
     setPlaceLib(null);
     setPendingLabel(null);
@@ -578,6 +587,30 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
         if (orig) runCommand(replaceTextBox(tbd.editIndex, { ...orig, text: tbd.text }));
       } else {
         runCommand(addItems({ textBoxes: [makeTextBox(tbd.start, tbd.end, tbd.text)] }));
+      }
+      return null;
+    });
+  }, [doc, runCommand]);
+
+  const commitTable = useCallback(() => {
+    setTableDraw((td) => {
+      if (!td) return null;
+      const rows = Math.max(1, Math.min(50, Math.round(td.rows)));
+      const cols = Math.max(1, Math.min(50, Math.round(td.cols)));
+      // Anchor at the last cursor position, or a sensible default sheet location.
+      const at = cursor ?? { x: 500000, y: 500000 };
+      runCommand(addItems({ tables: [makeTable(at, rows, cols)] }));
+      return null;
+    });
+  }, [cursor, runCommand]);
+
+  const commitTableEdit = useCallback(() => {
+    setTableEdit((te) => {
+      if (!te || !doc) return null;
+      const orig = doc.tables[te.index];
+      if (orig) {
+        const cells = orig.cells.map((c, i) => ({ ...c, text: te.texts[i] ?? c.text }));
+        runCommand(replaceTable(te.index, { ...orig, cells }));
       }
       return null;
     });
@@ -1001,6 +1034,57 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
             <div className="ze-modal-footer">
               <button className="ze-btn" onClick={() => setTextBoxDraw(null)}>Cancel</button>
               <button className="ze-btn primary" disabled={!textBoxDraw.text.trim()} onClick={commitTextBox}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table: choose the grid size, then place the table (SCH_TABLE). */}
+      {tableDraw && (
+        <div className="ze-modal-backdrop" onMouseDown={() => setTableDraw(null)}>
+          <div className="ze-modal ze-label-dialog" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="ze-modal-header">
+              Insert Table
+              <span className="x" title="Cancel" onClick={() => setTableDraw(null)}>✕</span>
+            </div>
+            <div className="ze-label-dialog-body" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label className="row"><span>Rows</span>
+                <input className="ze-search" type="number" min={1} max={50} autoFocus value={tableDraw.rows}
+                  onChange={(e) => setTableDraw({ ...tableDraw, rows: Number(e.target.value) })}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitTable(); }} /></label>
+              <label className="row"><span>Columns</span>
+                <input className="ze-search" type="number" min={1} max={50} value={tableDraw.cols}
+                  onChange={(e) => setTableDraw({ ...tableDraw, cols: Number(e.target.value) })}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitTable(); }} /></label>
+            </div>
+            <div className="ze-modal-footer">
+              <button className="ze-btn" onClick={() => setTableDraw(null)}>Cancel</button>
+              <button className="ze-btn primary" onClick={commitTable}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table cell editor: a grid of inputs matching the table (double-click to edit). */}
+      {tableEdit && (
+        <div className="ze-modal-backdrop" onMouseDown={() => setTableEdit(null)}>
+          <div className="ze-modal ze-label-dialog" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="ze-modal-header">
+              Edit Table
+              <span className="x" title="Cancel" onClick={() => setTableEdit(null)}>✕</span>
+            </div>
+            <div className="ze-label-dialog-body">
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tableEdit.cols}, 1fr)`, gap: 4 }}>
+                {tableEdit.texts.map((txt, i) => (
+                  <input key={i} className="ze-search" value={txt} style={{ minWidth: 80 }}
+                    onChange={(e) => setTableEdit((te) => te ? { ...te, texts: te.texts.map((t, j) => j === i ? e.target.value : t) } : te)}
+                    onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commitTableEdit(); }} />
+                ))}
+              </div>
+            </div>
+            <div className="ze-modal-footer">
+              <button className="ze-btn" onClick={() => setTableEdit(null)}>Cancel</button>
+              <button className="ze-btn primary" onClick={commitTableEdit}>OK</button>
             </div>
           </div>
         </div>

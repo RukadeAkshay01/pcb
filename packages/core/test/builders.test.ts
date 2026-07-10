@@ -3,7 +3,7 @@ import { parse, serialize } from '../src/sexpr/index.js';
 import { readSchematic } from '../src/model/read-schematic.js';
 import { writeSchematic } from '../src/model/write-schematic.js';
 import { makeBus, makeLabel } from '../src/edit/build.js';
-import { makeTextBox } from '../src/edit/build-graphics.js';
+import { makeTextBox, makeTable } from '../src/edit/build-graphics.js';
 import { addItems } from '../src/edit/mutate.js';
 import { mmToIU } from '../src/units.js';
 
@@ -88,5 +88,38 @@ describe('makeTextBox', () => {
     expect(doc.textBoxes).toHaveLength(1);
     const undone = cmd.invert(EMPTY()).apply(doc);
     expect(undone.textBoxes).toHaveLength(0);
+  });
+});
+
+describe('makeTable', () => {
+  it('builds a (table ...) node with column_count, widths, heights and cells', () => {
+    const t = makeTable(at(10, 10), 2, 3, ['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(t.columnCount).toBe(3);
+    expect(t.cells).toHaveLength(6);
+    const s = serialize(t.source);
+    expect(s).toContain('(table');
+    expect(s).toContain('(column_count 3)');
+    expect(s).toContain('(cells');
+    expect(s).toContain('(table_cell "a"');
+    expect(s).toContain('(span 1 1)');
+  });
+
+  it('round-trips through read/write with cell text and grid intact', () => {
+    const t = makeTable(at(10, 10), 2, 2, ['R0C0', 'R0C1', 'R1C0', 'R1C1']);
+    const doc = addItems({ tables: [t] }).apply(EMPTY());
+    const back = readSchematic(parse(serialize(writeSchematic(doc))));
+    expect(back.tables).toHaveLength(1);
+    const bt = back.tables[0]!;
+    expect(bt.columnCount).toBe(2);
+    expect(bt.cells.map((c) => c.text)).toEqual(['R0C0', 'R0C1', 'R1C0', 'R1C1']);
+    expect(bt.borderExternal).toBe(true);
+    expect(bt.separatorRows).toBe(true);
+  });
+
+  it('adds and deletes undoably', () => {
+    const cmd = addItems({ tables: [makeTable(at(0, 0), 2, 2)] });
+    const doc = cmd.apply(EMPTY());
+    expect(doc.tables).toHaveLength(1);
+    expect(cmd.invert(EMPTY()).apply(doc).tables).toHaveLength(0);
   });
 });

@@ -18,7 +18,7 @@ import { head, isList, list, atom, str, type SList, type SNode } from '../sexpr/
 import { childNamed, numArg } from '../sexpr/query.js';
 import { iuToMM, mmToIU } from '../units.js';
 import { readField } from './read-schematic.js';
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, SchBusEntry, SchTextBox, TextEffects, Vec2 } from './types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, SchBusEntry, SchTextBox, SchTable, SchTableCell, TextEffects, Vec2 } from './types.js';
 
 function mm(iu: number): string {
   let s = iuToMM(iu).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -381,12 +381,38 @@ function writeTextBox(tb: SchTextBox): SList {
   return node;
 }
 
+/** Patch a table cell: content (item 1), position and size (like a text box). */
+function writeTableCell(cell: SchTableCell): SList {
+  let node = setItem(cell.source, 1, str(cell.text));
+  node = patchAt(node, cell.start);
+  const size = { x: cell.end.x - cell.start.x, y: cell.end.y - cell.start.y };
+  if (childNamed(node, 'size')) {
+    node = mapChild(node, 'size', () => list(atom('size'), atom(mm(size.x)), atom(mm(size.y))));
+  }
+  return node;
+}
+
+/** Patch a table: rebuild its `(cells ...)` block from the model's cells (lossless otherwise). */
+function writeTable(tb: SchTable): SList {
+  return mapChild(tb.source, 'cells', (cells) => {
+    let i = 0;
+    const items = cells.items.map((it) => {
+      if (isList(it) && head(it) === 'table_cell') {
+        const cell = tb.cells[i++];
+        return cell ? writeTableCell(cell) : it;
+      }
+      return it;
+    });
+    return { kind: 'list', items };
+  });
+}
+
 const HEADER_ORDER = ['version', 'generator', 'generator_version', 'uuid', 'paper', 'title_block'];
 const STRUCTURAL = new Set([...HEADER_ORDER, 'lib_symbols']);
 const ITEM_HEADS = new Set([
   'symbol', 'wire', 'bus', 'polyline', 'junction', 'no_connect',
   'label', 'global_label', 'hierarchical_label', 'text', 'bus_entry', 'sheet',
-  'image', 'rectangle', 'circle', 'arc', 'text_box',
+  'image', 'rectangle', 'circle', 'arc', 'text_box', 'table',
 ]);
 
 /** Rebuild the `(kicad_sch ...)` root list from the current model. */
@@ -409,6 +435,7 @@ export function writeSchematic(sch: Schematic): SList {
     ...sch.labels.map(writeLabel),
     ...sch.sheets.map(writeSheet),
     ...sch.textBoxes.map(writeTextBox),
+    ...sch.tables.map(writeTable),
     // Images and sheet-level graphic shapes are render-only for now: their source
     // nodes pass through untouched.
     ...sch.images.map((im) => im.source),

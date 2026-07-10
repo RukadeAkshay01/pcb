@@ -340,6 +340,9 @@ export function renderSchematic(
   // Text boxes (SCH_TEXTBOX): bordered box with word-wrapped text inside.
   for (const tb of sch.textBoxes) drawTextBox(ctx, tb, theme);
 
+  // Tables (SCH_TABLE): cell text, then border + row/column separators.
+  for (const t of sch.tables) drawTable(ctx, t, theme);
+
   // Embedded bitmaps (SCH_BITMAP): centred at `at`, sized pixels x 254000/300 IU
   // (BITMAP_BASE m_pixelSizeIu for 300 ppi) x the item's scale.
   for (const im of sch.images) {
@@ -594,6 +597,84 @@ function drawTextBox(ctx: CanvasRenderingContext2D, tb: Schematic['textBoxes'][n
     // per-line top so each wrapped row sits pitch apart.
     drawText(ctx, line, { x: anchorX, y: firstBaseTop - h + i * pitch }, h, textColor, [...hj, 'top'], 0, bold, italic);
   });
+}
+
+/** Draw word-wrapped text inside the box [x0,y0]-[x1,y1] minus margins (shared by cells). */
+function drawBoxText(
+  ctx: CanvasRenderingContext2D, text: string, x0: number, y0: number, x1: number, y1: number,
+  m: { left: number; top: number; right: number; bottom: number },
+  effects: Schematic['textBoxes'][number]['effects'], color: string,
+): void {
+  const h = effects?.fontSize?.[0] ?? 12700;
+  const innerW = (x1 - x0) - m.left - m.right;
+  if (innerW <= 0 || text === '') return;
+  const lines = wrapTextBox(text, innerW, h);
+  const pitch = h * INTERLINE;
+  const justify = effects?.justify ?? ['left', 'top'];
+  const right = justify.includes('right'), hcenter = justify.includes('center') && !justify.includes('left') && !justify.includes('right');
+  const anchorX = right ? x1 - m.right : hcenter ? (x0 + m.left + x1 - m.right) / 2 : x0 + m.left;
+  const hj: readonly string[] = right ? ['right'] : hcenter ? ['center'] : ['left'];
+  const top = y0 + m.top;
+  lines.forEach((line, i) => {
+    drawText(ctx, line, { x: anchorX, y: top + i * pitch }, h, color, [...hj, 'top'], 0, effects?.bold ?? false, effects?.italic ?? false);
+  });
+}
+
+/**
+ * Draw a table (SCH_TABLE): each cell's wrapped text, then the row/column
+ * separators and the external border. Grounded in SCH_TABLE::Plot ordering
+ * (cells first, grid lines last).
+ */
+function drawTable(ctx: CanvasRenderingContext2D, t: Schematic['tables'][number], theme: Theme): void {
+  if (t.cells.length === 0) return;
+  // Table extent from the cells.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const c of t.cells) {
+    x0 = Math.min(x0, c.start.x, c.end.x); y0 = Math.min(y0, c.start.y, c.end.y);
+    x1 = Math.max(x1, c.start.x, c.end.x); y1 = Math.max(y1, c.start.y, c.end.y);
+  }
+  if (!inView(x0, y0, x1, y1)) return;
+
+  const color = theme.noteLine;
+  const border = t.borderStroke && t.borderStroke.width > 0 ? t.borderStroke.width : DEFAULT_LINE_WIDTH;
+  const sep = t.separatorsStroke && t.separatorsStroke.width > 0 ? t.separatorsStroke.width : DEFAULT_LINE_WIDTH;
+
+  // Cell text.
+  const m = { left: 0, top: 0, right: 0, bottom: 0 };
+  for (const c of t.cells) {
+    const cm = c.margins ?? m;
+    drawBoxText(ctx, c.text, Math.min(c.start.x, c.end.x), Math.min(c.start.y, c.end.y),
+      Math.max(c.start.x, c.end.x), Math.max(c.start.y, c.end.y), cm, c.effects, color);
+  }
+
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'butt';
+
+  // Column separators (internal vertical lines), from cumulative column widths.
+  if (t.separatorCols) {
+    ctx.lineWidth = sep;
+    let x = x0;
+    for (let c = 0; c < t.colWidths.length - 1; c++) {
+      x += t.colWidths[c]!;
+      ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+    }
+  }
+  // Row separators (internal horizontal lines). The first one is the header separator.
+  let y = y0;
+  for (let r = 0; r < t.rowHeights.length - 1; r++) {
+    y += t.rowHeights[r]!;
+    const isHeader = r === 0;
+    if ((isHeader && t.borderHeader) || (!isHeader && t.separatorRows)) {
+      ctx.lineWidth = sep;
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+    }
+  }
+
+  // External border around the whole table.
+  if (t.borderExternal) {
+    ctx.lineWidth = border;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  }
 }
 
 // ----- embedded bitmaps -------------------------------------------------------

@@ -193,7 +193,7 @@ interface Props {
   /** Switch the active tool (used to auto-start a wire from a dangling pin). */
   onRequestTool?: (id: string) => void;
   /** Double-clicked item (KiCad's Properties action, sch_edit_tool.cpp). */
-  onEditItem?: (id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox') => void;
+  onEditItem?: (id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox' | 'table') => void;
   /** Box-selection result (KiCad SelectMultiple): replace/add/subtract the ids. */
   onSelectBox?: (ids: ReadonlySet<string>, additive: boolean, subtractive: boolean) => void;
   /** Items being pasted: they follow the cursor until clicked to drop (KiCad's paste-then-move). */

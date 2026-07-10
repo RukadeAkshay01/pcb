@@ -38,6 +38,8 @@ import type {
   SchNoConnect,
   SchSheet,
   SchSymbol,
+  SchTable,
+  SchTableCell,
   SchTextBox,
   SheetPin,
   Stroke,
@@ -512,6 +514,69 @@ function readTextBox(node: SList): SchTextBox {
   return tb;
 }
 
+/** `(table_cell "text" (at ..)(size ..)(margins ..)(span c r)(fill)(effects)(uuid))` — SCH_TABLECELL. */
+function readTableCell(node: SList): SchTableCell {
+  const { at } = readAt(node);
+  const startNode = childNamed(node, 'start');
+  const start = startNode ? readPoint(startNode, 0) : at;
+  const sizeNode = childNamed(node, 'size');
+  const endNode = childNamed(node, 'end');
+  const end = endNode
+    ? readPoint(endNode, 0)
+    : { x: start.x + mmToIU(numArg(sizeNode ?? node, 0) ?? 0), y: start.y + mmToIU(numArg(sizeNode ?? node, 1) ?? 0) };
+  const spanNode = childNamed(node, 'span');
+  const cell: { -readonly [K in keyof SchTableCell]: SchTableCell[K] } = {
+    text: arg(node, 0) ?? '',
+    start,
+    end,
+    colSpan: spanNode ? (numArg(spanNode, 0) ?? 1) : 1,
+    rowSpan: spanNode ? (numArg(spanNode, 1) ?? 1) : 1,
+    source: node,
+  };
+  const marginsNode = childNamed(node, 'margins');
+  if (marginsNode) {
+    cell.margins = {
+      left: mmToIU(numArg(marginsNode, 0) ?? 0),
+      top: mmToIU(numArg(marginsNode, 1) ?? 0),
+      right: mmToIU(numArg(marginsNode, 2) ?? 0),
+      bottom: mmToIU(numArg(marginsNode, 3) ?? 0),
+    };
+  }
+  const fill = readFill(node);
+  if (fill) cell.fill = fill;
+  const effects = readEffects(node);
+  if (effects) cell.effects = effects;
+  return cell;
+}
+
+/** `(table (column_count N)(border ..)(separators ..)(column_widths ..)(row_heights ..)(uuid)(cells ..))` — SCH_TABLE. */
+function readTable(node: SList): SchTable {
+  const colCountNode = childNamed(node, 'column_count');
+  const widthsNode = childNamed(node, 'column_widths');
+  const heightsNode = childNamed(node, 'row_heights');
+  const borderNode = childNamed(node, 'border');
+  const separatorsNode = childNamed(node, 'separators');
+  const cellsNode = childNamed(node, 'cells');
+  const table: { -readonly [K in keyof SchTable]: SchTable[K] } = {
+    columnCount: colCountNode ? (numArg(colCountNode, 0) ?? 1) : 1,
+    colWidths: widthsNode ? args(widthsNode).map((v) => mmToIU(Number(v))) : [],
+    rowHeights: heightsNode ? args(heightsNode).map((v) => mmToIU(Number(v))) : [],
+    borderExternal: borderNode ? boolField(borderNode, 'external', false) : false,
+    borderHeader: borderNode ? boolField(borderNode, 'header', false) : false,
+    separatorRows: separatorsNode ? boolField(separatorsNode, 'rows', false) : false,
+    separatorCols: separatorsNode ? boolField(separatorsNode, 'cols', false) : false,
+    cells: cellsNode ? childrenNamed(cellsNode, 'table_cell').map(readTableCell) : [],
+    source: node,
+  };
+  const borderStroke = borderNode && readStroke(borderNode);
+  if (borderStroke) table.borderStroke = borderStroke;
+  const sepStroke = separatorsNode && readStroke(separatorsNode);
+  if (sepStroke) table.separatorsStroke = sepStroke;
+  const uuid = stringField(node, 'uuid');
+  if (uuid) table.uuid = uuid;
+  return table;
+}
+
 function readNoConnect(node: SList): SchNoConnect {
   const { at } = readAt(node);
   const nc: { -readonly [K in keyof SchNoConnect]: SchNoConnect[K] } = { at, source: node };
@@ -592,6 +657,7 @@ export function readSchematic(root: SList): Schematic {
   const images: SchImage[] = [];
   const graphics: LibGraphic[] = [];
   const textBoxes: SchTextBox[] = [];
+  const tables: SchTable[] = [];
 
   const libSymbolsNode = childNamed(root, 'lib_symbols');
   if (libSymbolsNode) {
@@ -616,6 +682,7 @@ export function readSchematic(root: SList): Schematic {
       if (g) graphics.push(g);
     }
     else if (name === 'text_box') textBoxes.push(readTextBox(item));
+    else if (name === 'table') tables.push(readTable(item));
     else if (LABEL_KINDS[name]) labels.push(readLabel(item, LABEL_KINDS[name]!));
   }
 
@@ -632,6 +699,7 @@ export function readSchematic(root: SList): Schematic {
     images,
     graphics,
     textBoxes,
+    tables,
     source: root,
   };
   const generator = stringField(root, 'generator');

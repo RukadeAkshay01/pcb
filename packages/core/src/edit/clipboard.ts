@@ -48,7 +48,7 @@ export function copySelectionText(sch: Schematic, ids: ReadonlySet<string>): str
   // Sheets are excluded from the clipboard for now: KiCad ships each sheet's
   // screen along on the clipboard (m_supplementaryClipboard), which needs
   // multi-document paste support.
-  const subset: Schematic = { ...sch, symbols, lines, junctions, noConnects, labels, sheets: [], busEntries: [], images: [], graphics: [], textBoxes: [], libSymbols: libs };
+  const subset: Schematic = { ...sch, symbols, lines, junctions, noConnects, labels, sheets: [], busEntries: [], images: [], graphics: [], textBoxes: [], tables: [], libSymbols: libs };
   const root = writeSchematic(subset);
 
   const parts: string[] = [];
@@ -157,7 +157,7 @@ export function parsePastedText(text: string, existing: Schematic): PastePayload
 
   // Not schematic data: paste as a text object (KiCad's IO_ERROR fallback).
   const asTextItem = (): PastePayload => ({
-    batch: { symbols: [], lines: [], junctions: [], noConnects: [], labels: [makeLabel('text', text, { x: 0, y: 0 })], sheets: [], busEntries: [], images: [], graphics: [], textBoxes: [] },
+    batch: { symbols: [], lines: [], junctions: [], noConnects: [], labels: [makeLabel('text', text, { x: 0, y: 0 })], sheets: [], busEntries: [], images: [], graphics: [], textBoxes: [], tables: [] },
     libs: [],
     refPoint: { x: 0, y: 0 },
   });
@@ -217,7 +217,7 @@ export function parsePastedText(text: string, existing: Schematic): PastePayload
   for (const l of labels) consider(l.at);
 
   return {
-    batch: { symbols, lines, junctions, noConnects, labels, sheets: [], busEntries: [], images: [], graphics: [], textBoxes: [] },
+    batch: { symbols, lines, junctions, noConnects, labels, sheets: [], busEntries: [], images: [], graphics: [], textBoxes: [], tables: [] },
     libs,
     refPoint: refPoint ?? { x: 0, y: 0 },
   };
@@ -249,6 +249,7 @@ export function translatePayload(p: PastePayload, delta: Vec2): PastePayload {
       images: [],
       graphics: [],
       textBoxes: [],
+      tables: [],
     },
   };
 }

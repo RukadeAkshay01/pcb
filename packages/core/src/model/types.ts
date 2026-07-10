@@ -234,6 +234,45 @@ export interface SchTextBox {
   readonly source: SList;
 }
 
+/**
+ * One cell of a table (SCH_TABLECELL): a text box variant that also carries its
+ * column/row span. `(table_cell "text" (at ..)(size ..)(margins ..)(span c r)
+ * (fill ..)(effects ..)(uuid ..))`.
+ */
+export interface SchTableCell {
+  readonly text: string;
+  readonly start: Vec2;
+  readonly end: Vec2;
+  readonly colSpan: number;
+  readonly rowSpan: number;
+  readonly margins?: TextBoxMargins;
+  readonly fill?: Fill;
+  readonly effects?: TextEffects;
+  readonly source: SList;
+}
+
+/**
+ * A table (SCH_TABLE): a grid of table cells with configurable borders and
+ * row/column separators. `(table (column_count N)(border ..)(separators ..)
+ * (column_widths ..)(row_heights ..)(uuid ..)(cells (table_cell ..) ...))`.
+ */
+export interface SchTable {
+  readonly columnCount: number;
+  readonly colWidths: readonly number[];
+  readonly rowHeights: readonly number[];
+  /** `(border (external ..) (header ..) [stroke])`. */
+  readonly borderExternal: boolean;
+  readonly borderHeader: boolean;
+  readonly borderStroke?: Stroke;
+  /** `(separators (rows ..) (cols ..) [stroke])`. */
+  readonly separatorRows: boolean;
+  readonly separatorCols: boolean;
+  readonly separatorsStroke?: Stroke;
+  readonly cells: readonly SchTableCell[];
+  readonly uuid?: string;
+  readonly source: SList;
+}
+
 /** Kinds of text label, matching KiCad tokens. */
 export type LabelKind = 'label' | 'global_label' | 'hierarchical_label' | 'text';
 
@@ -312,6 +351,8 @@ export interface Schematic {
   readonly graphics: readonly LibGraphic[];
   /** Bordered, word-wrapped text boxes (SCH_TEXTBOX). */
   readonly textBoxes: readonly SchTextBox[];
+  /** Tables (SCH_TABLE): grids of table cells with borders/separators. */
+  readonly tables: readonly SchTable[];
   /** The root AST node, retained as the lossless source of truth. */
   readonly source: SList;
   /** Display filename (app metadata set on load; not part of the file format). */

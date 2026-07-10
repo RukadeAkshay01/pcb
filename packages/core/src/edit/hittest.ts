@@ -10,7 +10,7 @@ import { contains, inflate, labelBox, symbolBodyBBox } from './bbox.js';
 
 /** A reference to a top-level, selectable schematic item. */
 export interface ItemRef {
-  kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox';
+  kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox' | 'table';
   /** Stable identity: the item's uuid, or `idx:<n>` when one is absent. */
   id: string;
 }
@@ -143,6 +143,18 @@ export function hitTest(
     const y0 = Math.min(tb.start.y, tb.end.y), y1 = Math.max(tb.start.y, tb.end.y);
     if (p.x >= x0 - accuracy && p.x <= x1 + accuracy && p.y >= y0 - accuracy && p.y <= y1 + accuracy)
       return { kind: 'textbox', id: refId('textbox', tb.uuid, i) };
+  }
+
+  // Tables: the union of every cell's bounding box (SCH_TABLE::HitTest).
+  for (let i = 0; i < sch.tables.length; i++) {
+    const t = sch.tables[i]!;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of t.cells) {
+      minX = Math.min(minX, c.start.x, c.end.x); minY = Math.min(minY, c.start.y, c.end.y);
+      maxX = Math.max(maxX, c.start.x, c.end.x); maxY = Math.max(maxY, c.start.y, c.end.y);
+    }
+    if (t.cells.length && p.x >= minX - accuracy && p.x <= maxX + accuracy && p.y >= minY - accuracy && p.y <= maxY + accuracy)
+      return { kind: 'table', id: refId('table', t.uuid, i) };
   }
 
   // Sheets last: their rectangle is large, so smaller items inside win first
