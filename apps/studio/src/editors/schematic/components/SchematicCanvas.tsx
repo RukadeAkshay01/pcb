@@ -61,9 +61,9 @@ const LABEL_TOOLS: Record<string, LabelKind> = {
 };
 
 /** Right-toolbar shape/sheet drawing tools and their in-progress shape kind. */
-type ShapeKind = 'rectangle' | 'circle' | 'arc' | 'lines' | 'bezier' | 'sheet';
+type ShapeKind = 'rectangle' | 'circle' | 'arc' | 'lines' | 'bezier' | 'sheet' | 'textbox';
 const SHAPE_TOOL: Record<string, ShapeKind> = {
-  rectangle: 'rectangle', circle: 'circle', arc: 'arc', lines: 'lines', bezier: 'bezier', drawSheet: 'sheet',
+  rectangle: 'rectangle', circle: 'circle', arc: 'arc', lines: 'lines', bezier: 'bezier', drawSheet: 'sheet', textBox: 'textbox',
 };
 
 interface DrawState { tool: ShapeKind; start: Vec2; points: Vec2[]; cursor: Vec2 }
@@ -129,6 +129,7 @@ function previewGraphic(ds: DrawState): LibGraphic | null {
   switch (ds.tool) {
     case 'rectangle':
     case 'sheet':
+    case 'textbox':
       return makeRectangle(ds.start, c);
     case 'circle':
       return makeCircle(ds.start, Math.hypot(c.x - ds.start.x, c.y - ds.start.y));
@@ -192,7 +193,7 @@ interface Props {
   /** Switch the active tool (used to auto-start a wire from a dangling pin). */
   onRequestTool?: (id: string) => void;
   /** Double-clicked item (KiCad's Properties action, sch_edit_tool.cpp). */
-  onEditItem?: (id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic') => void;
+  onEditItem?: (id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox') => void;
   /** Box-selection result (KiCad SelectMultiple): replace/add/subtract the ids. */
   onSelectBox?: (ids: ReadonlySet<string>, additive: boolean, subtractive: boolean) => void;
   /** Items being pasted: they follow the cursor until clicked to drop (KiCad's paste-then-move). */
@@ -212,6 +213,8 @@ interface Props {
   inputPrefs?: InputPrefs;
   /** A hierarchical sheet rectangle was drawn: prompt for name/file and commit. */
   onSheetDrawn?: (at: Vec2, size: { w: number; h: number }) => void;
+  /** A text-box rectangle was drawn: prompt for its text and commit (SCH_TEXTBOX). */
+  onTextBoxDrawn?: (start: Vec2, end: Vec2) => void;
   /** A sheet-pin click landed on a sheet edge: prompt for the pin name and add it. */
   onSheetPinClick?: (sheetIndex: number, at: Vec2, side: 0 | 90 | 180 | 270) => void;
   /** An image chosen in the editor, following the cursor until clicked to place. */
@@ -231,7 +234,7 @@ const BOX_OUTLINE_L2R = 'rgb(179, 179, 0)'; // window select: dark yellow
 const BOX_OUTLINE_R2L = 'rgb(26, 26, 255)'; // greedy select: blue
 
 export const SchematicCanvas = forwardRef<CanvasController, Props>(function SchematicCanvas(
-  { schematic, libById, selection, activeTool, lineMode, placeLib, pendingLabel, highlight, onSelect, onHighlight, onRequestTool, onEditItem, onSelectBox, pastePending, onPasteDone, ercMarkers, onCommand, onCursorMove, onScaleChange, theme = KICAD_DEFAULT, renderOpts = DEFAULT_RENDER_OPTS, inputPrefs = DEFAULT_INPUT_PREFS, onSheetDrawn, onSheetPinClick, pendingImage, onImagePlaced },
+  { schematic, libById, selection, activeTool, lineMode, placeLib, pendingLabel, highlight, onSelect, onHighlight, onRequestTool, onEditItem, onSelectBox, pastePending, onPasteDone, ercMarkers, onCommand, onCursorMove, onScaleChange, theme = KICAD_DEFAULT, renderOpts = DEFAULT_RENDER_OPTS, inputPrefs = DEFAULT_INPUT_PREFS, onSheetDrawn, onTextBoxDrawn, onSheetPinClick, pendingImage, onImagePlaced },
   ref,
 ): JSX.Element {
   // The active snap grid (Preferences > Grids). With grid overrides enabled
@@ -589,9 +592,16 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
       draw();
       return;
     }
+    else if (ds.tool === 'textbox') {
+      const start = { x: Math.min(ds.start.x, p.x), y: Math.min(ds.start.y, p.y) };
+      const end = { x: Math.max(ds.start.x, p.x), y: Math.max(ds.start.y, p.y) };
+      if (end.x > start.x && end.y > start.y) onTextBoxDrawn?.(start, end);
+      draw();
+      return;
+    }
     if (g) onCommand(addItems({ graphics: [g] }));
     draw();
-  }, [onCommand, onSheetDrawn, draw]);
+  }, [onCommand, onSheetDrawn, onTextBoxDrawn, draw]);
 
   // Finish an open polyline (lines tool): double-click / Enter / right-click.
   const finishPoly = useCallback(() => {

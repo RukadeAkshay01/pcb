@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, withCleanup, refId, editSymbolProperties, copySelectionText, parsePastedText, runErc, buildSheetTree, sheetFile, findRootFile, addItems, makeSheet, addSheetPin, replaceSheet, makeImage, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type SheetSide, type TransformOp, type LabelKind, type LabelShape, type SymbolEdit, type PastePayload, type ErcViolation, type SheetTreeNode } from '@ziroeda/core';
+import { parse, readSchematic, serializeSchematic, iuToMM, deleteByIds, transformItems, computeNetlist, withCleanup, refId, editSymbolProperties, copySelectionText, parsePastedText, runErc, buildSheetTree, sheetFile, findRootFile, addItems, makeSheet, addSheetPin, replaceSheet, replaceTextBox, makeImage, makeTextBox, History, type Schematic, type LibSymbol, type EditCommand, type Vec2, type SheetSide, type TransformOp, type LabelKind, type LabelShape, type SymbolEdit, type PastePayload, type ErcViolation, type SheetTreeNode } from '@ziroeda/core';
 import { SchematicCanvas, type CanvasController, type LineMode, type PendingLabel } from './components/SchematicCanvas.js';
 import { LabelDialog } from './components/LabelDialog.js';
 import { SymbolPropertiesDialog } from './components/SymbolPropertiesDialog.js';
@@ -108,6 +108,7 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
   // click awaiting its name, an image chosen and following the cursor.
   const [sheetDraw, setSheetDraw] = useState<{ at: Vec2; size: { w: number; h: number }; name: string; file: string } | null>(null);
   const [sheetPinDraw, setSheetPinDraw] = useState<{ index: number; at: Vec2; side: SheetSide; name: string } | null>(null);
+  const [textBoxDraw, setTextBoxDraw] = useState<{ start: Vec2; end: Vec2; text: string; editIndex?: number } | null>(null);
   const [pendingImage, setPendingImage] = useState<{ data: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [localToggles, setLocalToggles] = useState<Set<string>>(new Set(DEFAULT_TOGGLES));
@@ -370,9 +371,17 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
     requestAnimationFrame(() => controller.current?.zoomToFit());
   }, [doc, currentFile, resetTransient]);
 
-  // KiCad's Properties action: only symbols have a properties dialog so far.
-  const onEditItem = useCallback((id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic') => {
+  // KiCad's Properties action: symbols have a full properties dialog; a text box
+  // reopens its text editor (double-click = edit).
+  const onEditItem = useCallback((id: string, kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox') => {
     if (kind === 'symbol') setPropsTarget(id);
+    if (kind === 'textbox' && doc) {
+      const idx = doc.textBoxes.findIndex((tb, i) => refId('textbox', tb.uuid, i) === id);
+      if (idx !== -1) {
+        const tb = doc.textBoxes[idx]!;
+        setTextBoxDraw({ start: tb.start, end: tb.end, text: tb.text, editIndex: idx });
+      }
+    }
     // Double-clicking a sheet enters it (KiCad's Enter Sheet).
     if (kind === 'sheet' && doc) {
       const idx = doc.sheets.findIndex((sh, i) => refId('sheet', sh.uuid, i) === id);
@@ -538,11 +547,9 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
   // Selecting a placement tool reopens its chooser/dialog (clears any attached item).
   const onToolSelect = useCallback((id: string) => {
     // The Image tool opens a file picker; the image then follows the cursor
-    // (SCH_ACTIONS::placeImage). Table has no model type yet.
+    // (SCH_ACTIONS::placeImage).
     if (id === 'image') { imageInputRef.current?.click(); return; }
-    // Text boxes and tables need model types (SCH_TEXTBOX / SCH_TABLE) that
-    // ZiroEDA does not represent yet; surface that instead of doing nothing.
-    if (id === 'textBox') { setError('Text boxes are not supported yet — use the Text tool for now.'); return; }
+    // Tables need an SCH_TABLE model type ZiroEDA does not represent yet.
     if (id === 'table') { setError('Tables are not supported yet.'); return; }
     setActiveTool(id);
     setPlaceLib(null);
@@ -558,6 +565,23 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
   const onSheetPinClick = useCallback((index: number, at: Vec2, side: SheetSide) => {
     setSheetPinDraw({ index, at, side, name: '' });
   }, []);
+
+  const onTextBoxDrawn = useCallback((start: Vec2, end: Vec2) => {
+    setTextBoxDraw({ start, end, text: '' });
+  }, []);
+
+  const commitTextBox = useCallback(() => {
+    setTextBoxDraw((tbd) => {
+      if (!tbd || !tbd.text.trim()) return tbd;
+      if (tbd.editIndex !== undefined && doc) {
+        const orig = doc.textBoxes[tbd.editIndex];
+        if (orig) runCommand(replaceTextBox(tbd.editIndex, { ...orig, text: tbd.text }));
+      } else {
+        runCommand(addItems({ textBoxes: [makeTextBox(tbd.start, tbd.end, tbd.text)] }));
+      }
+      return null;
+    });
+  }, [doc, runCommand]);
 
   const onImagePlaced = useCallback((at: Vec2) => {
     setPendingImage((img) => {
@@ -812,6 +836,7 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
             renderOpts={renderOpts}
             inputPrefs={inputPrefs}
             onSheetDrawn={onSheetDrawn}
+            onTextBoxDrawn={onTextBoxDrawn}
             onSheetPinClick={onSheetPinClick}
             pendingImage={pendingImage}
             onImagePlaced={onImagePlaced}
@@ -950,6 +975,32 @@ export function SchematicEditor({ onExitToHome, onShowPcb, onShowSymbolEditor, i
                 }}>
                 OK
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Text box: enter the wrapped text after drawing the rectangle (SCH_TEXTBOX). */}
+      {textBoxDraw && (
+        <div className="ze-modal-backdrop" onMouseDown={() => setTextBoxDraw(null)}>
+          <div className="ze-modal ze-label-dialog" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="ze-modal-header">
+              Text Box Properties
+              <span className="x" title="Cancel" onClick={() => setTextBoxDraw(null)}>✕</span>
+            </div>
+            <div className="ze-label-dialog-body">
+              <label className="row" style={{ alignItems: 'flex-start' }}><span>Text</span>
+                <textarea className="ze-search" autoFocus rows={4} style={{ resize: 'vertical', minWidth: 260 }}
+                  value={textBoxDraw.text}
+                  onChange={(e) => setTextBoxDraw({ ...textBoxDraw, text: e.target.value })}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commitTextBox();
+                  }} /></label>
+            </div>
+            <div className="ze-modal-footer">
+              <button className="ze-btn" onClick={() => setTextBoxDraw(null)}>Cancel</button>
+              <button className="ze-btn primary" disabled={!textBoxDraw.text.trim()} onClick={commitTextBox}>OK</button>
             </div>
           </div>
         </div>

@@ -10,7 +10,7 @@
 import { list, atom, str, type SList, type SNode } from '../sexpr/types.js';
 import { iuToMM, mmToIU } from '../units.js';
 import { newUuid } from './build.js';
-import type { LibGraphic, SchBusEntry, SchImage, SchSheet, SheetPin, SchField, Stroke, Fill, LabelShape, Vec2 } from '../model/types.js';
+import type { LibGraphic, SchBusEntry, SchImage, SchSheet, SchTextBox, SheetPin, SchField, Stroke, Fill, TextEffects, LabelShape, Vec2 } from '../model/types.js';
 
 function mm(iu: number): string {
   let s = iuToMM(iu).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -145,6 +145,56 @@ export function addSheetPin(sheet: SchSheet, name: string, at: Vec2, side: Sheet
   // existing pin/property); appending at the end keeps writeSheet's pin order.
   const items = [...sheet.source.items, pinSource];
   return { ...sheet, pins: [...sheet.pins, pin], source: { kind: 'list', items } };
+}
+
+// ----- text box (SCH_TEXTBOX) ----------------------------------------------------
+
+/** DEFAULT_SIZE_TEXT = 50 mils (1.27 mm) — EDA_TEXT default text height. */
+const DEFAULT_TEXT_HEIGHT = mmToIU(1.27);
+/** DEFAULT_LINE_WIDTH_MILS = 6 mils — a text box's default border width. */
+const DEFAULT_TEXTBOX_STROKE = mmToIU(0.1524);
+
+/** Build the `(effects (font (size h w)) (justify ..))` node for a text box. */
+function textEffectsNode(effects: TextEffects): SList {
+  const size = effects.fontSize ?? [DEFAULT_TEXT_HEIGHT, DEFAULT_TEXT_HEIGHT];
+  const font: SNode[] = [atom('font'), list(atom('size'), atom(mm(size[0])), atom(mm(size[1])))];
+  if (effects.bold) font.push(list(atom('bold'), atom('yes')));
+  if (effects.italic) font.push(list(atom('italic'), atom('yes')));
+  const items: SNode[] = [atom('effects'), { kind: 'list', items: font }];
+  const justify = (effects.justify ?? []).filter((t) => t !== 'center');
+  if (justify.length) items.push({ kind: 'list', items: [atom('justify'), ...justify.map((t) => atom(t))] });
+  return { kind: 'list', items };
+}
+
+/**
+ * Create a bordered, word-wrapped text box (SCH_TEXTBOX). `start`/`end` are the
+ * two opposite corners in +Y-down sheet space. Justification defaults to
+ * left/top and margins to KiCad's legacy margin (stroke/2 + textHeight*0.75).
+ */
+export function makeTextBox(
+  start: Vec2,
+  end: Vec2,
+  text: string,
+  opts: { effects?: TextEffects; stroke?: Stroke; fill?: Fill } = {},
+): SchTextBox {
+  const uuid = newUuid();
+  const stroke: Stroke = opts.stroke ?? { width: DEFAULT_TEXTBOX_STROKE, type: 'default' };
+  const fill: Fill = opts.fill ?? { type: 'none' };
+  const effects: TextEffects = opts.effects ?? { hidden: false, justify: ['left', 'top'] };
+  const textH = effects.fontSize?.[0] ?? DEFAULT_TEXT_HEIGHT;
+  const margin = Math.round(stroke.width / 2) + Math.round(textH * 0.75);
+  const margins = { left: margin, top: margin, right: margin, bottom: margin };
+  const size = { x: end.x - start.x, y: end.y - start.y };
+  const source = list(atom('text_box'), str(text),
+    list(atom('exclude_from_sim'), atom('no')),
+    list(atom('at'), atom(mm(start.x)), atom(mm(start.y)), atom('0')),
+    list(atom('size'), atom(mm(size.x)), atom(mm(size.y))),
+    list(atom('margins'), atom(mm(margin)), atom(mm(margin)), atom(mm(margin)), atom(mm(margin))),
+    list(atom('stroke'), list(atom('width'), atom(mm(stroke.width))), list(atom('type'), atom(stroke.type))),
+    fillNode(fill),
+    textEffectsNode(effects),
+    list(atom('uuid'), str(uuid)));
+  return { text, start, end, angle: 0, margins, stroke, fill, effects, excludedFromSim: false, uuid, source };
 }
 
 // ----- image (SCH_BITMAP) --------------------------------------------------------

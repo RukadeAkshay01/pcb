@@ -18,7 +18,7 @@ import { head, isList, list, atom, str, type SList, type SNode } from '../sexpr/
 import { childNamed, numArg } from '../sexpr/query.js';
 import { iuToMM, mmToIU } from '../units.js';
 import { readField } from './read-schematic.js';
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, SchBusEntry, TextEffects, Vec2 } from './types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, SchNoConnect, SchSheet, SchBusEntry, SchTextBox, TextEffects, Vec2 } from './types.js';
 
 function mm(iu: number): string {
   let s = iuToMM(iu).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -370,12 +370,23 @@ function writeLabel(l: SchLabel): SList {
   return patchAt(setItem(l.source, 1, str(l.text)), l.at);
 }
 
+/** Patch a text box: content (item 1), position (`at` = start) and `(size ..)`. */
+function writeTextBox(tb: SchTextBox): SList {
+  let node = setItem(tb.source, 1, str(tb.text));
+  node = patchAt(node, tb.start);
+  const size = { x: tb.end.x - tb.start.x, y: tb.end.y - tb.start.y };
+  if (childNamed(node, 'size')) {
+    node = mapChild(node, 'size', () => list(atom('size'), atom(mm(size.x)), atom(mm(size.y))));
+  }
+  return node;
+}
+
 const HEADER_ORDER = ['version', 'generator', 'generator_version', 'uuid', 'paper', 'title_block'];
 const STRUCTURAL = new Set([...HEADER_ORDER, 'lib_symbols']);
 const ITEM_HEADS = new Set([
   'symbol', 'wire', 'bus', 'polyline', 'junction', 'no_connect',
   'label', 'global_label', 'hierarchical_label', 'text', 'bus_entry', 'sheet',
-  'image', 'rectangle', 'circle', 'arc',
+  'image', 'rectangle', 'circle', 'arc', 'text_box',
 ]);
 
 /** Rebuild the `(kicad_sch ...)` root list from the current model. */
@@ -397,6 +408,7 @@ export function writeSchematic(sch: Schematic): SList {
     ...sch.busEntries.map(writeBusEntry),
     ...sch.labels.map(writeLabel),
     ...sch.sheets.map(writeSheet),
+    ...sch.textBoxes.map(writeTextBox),
     // Images and sheet-level graphic shapes are render-only for now: their source
     // nodes pass through untouched.
     ...sch.images.map((im) => im.source),

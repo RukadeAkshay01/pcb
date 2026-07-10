@@ -337,6 +337,9 @@ export function renderSchematic(
   // item's own stroke colour/dash, else LAYER_NOTES; colour fills honoured.
   for (const g of sch.graphics) drawSheetGraphic(ctx, g, theme);
 
+  // Text boxes (SCH_TEXTBOX): bordered box with word-wrapped text inside.
+  for (const tb of sch.textBoxes) drawTextBox(ctx, tb, theme);
+
   // Embedded bitmaps (SCH_BITMAP): centred at `at`, sized pixels x 254000/300 IU
   // (BITMAP_BASE m_pixelSizeIu for 300 ppi) x the item's scale.
   for (const im of sch.images) {
@@ -514,6 +517,83 @@ function drawSheetGraphic(ctx: CanvasRenderingContext2D, g: LibGraphic, theme: T
     ctx.stroke();
   }
   ctx.setLineDash([]);
+}
+
+/**
+ * KiCad interline pitch for the stroke font: METRICS::m_InterlinePitch (1.68) x
+ * STROKE_FONT::LEGACY_FACTOR (0.9583). Line N's baseline sits N*pitch below the first.
+ */
+const INTERLINE = 1.68 * 0.9583;
+
+/** Word-wrap `text` into lines fitting `maxWidth` at font `height` (KiCad LinebreakText). */
+function wrapTextBox(text: string, maxWidth: number, height: number): string[] {
+  const out: string[] = [];
+  for (const para of text.split('\n')) {
+    if (para === '') { out.push(''); continue; }
+    let cur = '';
+    for (const word of para.split(' ')) {
+      const trial = cur === '' ? word : `${cur} ${word}`;
+      if (cur === '' || measureText(trial, height) <= maxWidth) cur = trial;
+      else { out.push(cur); cur = word; }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+/**
+ * Draw a text box (SCH_TEXTBOX): its border rectangle + fill, then the text
+ * word-wrapped inside the box minus margins, honouring justification (default
+ * left/top). Grounded in KiCad's SCH_TEXTBOX::GetShownText / GetDrawPos.
+ */
+function drawTextBox(ctx: CanvasRenderingContext2D, tb: Schematic['textBoxes'][number], theme: Theme): void {
+  const x0 = Math.min(tb.start.x, tb.end.x), x1 = Math.max(tb.start.x, tb.end.x);
+  const y0 = Math.min(tb.start.y, tb.end.y), y1 = Math.max(tb.start.y, tb.end.y);
+  if (!inView(x0, y0, x1, y1)) return;
+
+  const stroke = tb.stroke;
+  const width = stroke && stroke.width > 0 ? stroke.width : DEFAULT_LINE_WIDTH;
+  const borderColor = stroke?.color ? cssColor(stroke.color) : theme.noteLine;
+  const textColor = tb.effects?.color ? cssColor(tb.effects.color) : theme.noteLine;
+  const fill = tb.fill?.type === 'color' && tb.fill.color ? cssColor(tb.fill.color)
+    : tb.fill?.type === 'background' ? theme.background : null;
+
+  // Border + fill. A width-0 default border still draws (KiCad draws the outline).
+  ctx.beginPath();
+  ctx.rect(x0, y0, x1 - x0, y1 - y0);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (!stroke || stroke.type !== 'none') {
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = width;
+    setDash(ctx, stroke?.type, width);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Wrapped text inside the box minus margins.
+  const m = tb.margins ?? { left: 0, top: 0, right: 0, bottom: 0 };
+  const h = tb.effects?.fontSize?.[0] ?? 12700;
+  const bold = tb.effects?.bold ?? false;
+  const italic = tb.effects?.italic ?? false;
+  const innerW = (x1 - x0) - m.left - m.right;
+  if (innerW <= 0 || tb.text === '') return;
+  const lines = wrapTextBox(tb.text, innerW, h);
+  const pitch = h * INTERLINE;
+  const justify = tb.effects?.justify ?? ['left', 'top'];
+  const right = justify.includes('right'), hcenter = justify.includes('center') && !justify.includes('left') && !justify.includes('right');
+  const bottom = justify.includes('bottom'), vcenter = justify.includes('center');
+
+  const anchorX = right ? x1 - m.right : hcenter ? (x0 + m.left + x1 - m.right) / 2 : x0 + m.left;
+  const hj: readonly string[] = right ? ['right'] : hcenter ? ['center'] : ['left'];
+  const blockH = (lines.length - 1) * pitch + h;
+  const innerTop = y0 + m.top, innerBot = y1 - m.bottom;
+  const firstBaseTop = bottom ? innerBot - blockH + h : vcenter ? (innerTop + innerBot) / 2 - blockH / 2 + h : innerTop + h;
+
+  lines.forEach((line, i) => {
+    // drawText takes the top of the cap box when justify includes 'top'; pass the
+    // per-line top so each wrapped row sits pitch apart.
+    drawText(ctx, line, { x: anchorX, y: firstBaseTop - h + i * pitch }, h, textColor, [...hj, 'top'], 0, bold, italic);
+  });
 }
 
 // ----- embedded bitmaps -------------------------------------------------------

@@ -203,6 +203,37 @@ export interface SchImage {
   readonly source: SList;
 }
 
+/** Margins around a text box's text, in IU (left/top/right/bottom). Mirrors SCH_TEXTBOX margins. */
+export interface TextBoxMargins {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/**
+ * A bordered, word-wrapped text box. Mirrors KiCad `SCH_TEXTBOX`
+ * (`(text_box "content" (at x y angle) (size w h) (margins l t r b)
+ *   (stroke ..) (fill ..) (effects ..) (uuid ..))`). `start`/`end` are the two
+ * opposite corners in +Y-down sheet space; the text wraps inside them minus margins.
+ */
+export interface SchTextBox {
+  readonly text: string;
+  /** Top-left corner (KiCad GetStart / `(at ..)`). */
+  readonly start: Vec2;
+  /** Bottom-right corner (start + `(size ..)`). */
+  readonly end: Vec2;
+  readonly angle: number;
+  readonly margins?: TextBoxMargins;
+  readonly stroke?: Stroke;
+  readonly fill?: Fill;
+  readonly effects?: TextEffects;
+  /** `(exclude_from_sim yes)`; undefined when absent. */
+  readonly excludedFromSim?: boolean;
+  readonly uuid?: string;
+  readonly source: SList;
+}
+
 /** Kinds of text label, matching KiCad tokens. */
 export type LabelKind = 'label' | 'global_label' | 'hierarchical_label' | 'text';
 
@@ -279,6 +310,8 @@ export interface Schematic {
   readonly images: readonly SchImage[];
   /** Sheet-level graphic shapes (rectangle/circle/arc) on the notes layer. */
   readonly graphics: readonly LibGraphic[];
+  /** Bordered, word-wrapped text boxes (SCH_TEXTBOX). */
+  readonly textBoxes: readonly SchTextBox[];
   /** The root AST node, retained as the lossless source of truth. */
   readonly source: SList;
   /** Display filename (app metadata set on load; not part of the file format). */

@@ -7,7 +7,7 @@
  * tee or a 3+-way meeting, not where two wires merely cross or simply continue.
  */
 
-import type { Schematic, SchSymbol, SchLine, SchJunction, SchNoConnect, SchLabel, SchSheet, SchBusEntry, SchImage, LibGraphic, LibSymbol, Vec2 } from '../model/types.js';
+import type { Schematic, SchSymbol, SchLine, SchJunction, SchNoConnect, SchLabel, SchSheet, SchBusEntry, SchImage, SchTextBox, LibGraphic, LibSymbol, Vec2 } from '../model/types.js';
 import type { Orientation } from '../geom/transform.js';
 import { refId } from './hittest.js';
 import { makeSymbol } from './build.js';
@@ -25,6 +25,7 @@ export interface ItemsBatch {
   images?: SchImage[];
   /** Sheet-level graphic shapes (rectangle/circle/arc/polyline on the notes layer). */
   graphics?: LibGraphic[];
+  textBoxes?: SchTextBox[];
 }
 
 function batchIds(b: ItemsBatch): Set<string> {
@@ -38,6 +39,7 @@ function batchIds(b: ItemsBatch): Set<string> {
   b.busEntries?.forEach((be, i) => ids.add(refId('busentry', be.uuid, i)));
   b.images?.forEach((im, i) => ids.add(refId('image', im.uuid, i)));
   b.graphics?.forEach((_, i) => ids.add(refId('graphic', undefined, i)));
+  b.textBoxes?.forEach((tb, i) => ids.add(refId('textbox', tb.uuid, i)));
   return ids;
 }
 
@@ -52,6 +54,7 @@ function collectByIds(doc: Schematic, ids: ReadonlySet<string>): ItemsBatch {
     busEntries: doc.busEntries.filter((be, i) => ids.has(refId('busentry', be.uuid, i))),
     images: doc.images.filter((im, i) => ids.has(refId('image', im.uuid, i))),
     graphics: doc.graphics.filter((_, i) => ids.has(refId('graphic', undefined, i))),
+    textBoxes: doc.textBoxes.filter((tb, i) => ids.has(refId('textbox', tb.uuid, i))),
   };
 }
 
@@ -71,6 +74,7 @@ export function addItems(batch: ItemsBatch): EditCommand {
         busEntries: batch.busEntries?.length ? [...doc.busEntries, ...batch.busEntries] : doc.busEntries,
         images: batch.images?.length ? [...doc.images, ...batch.images] : doc.images,
         graphics: batch.graphics?.length ? [...doc.graphics, ...batch.graphics] : doc.graphics,
+        textBoxes: batch.textBoxes?.length ? [...doc.textBoxes, ...batch.textBoxes] : doc.textBoxes,
       };
     },
     invert(): EditCommand {
@@ -96,6 +100,7 @@ export function deleteByIds(ids: ReadonlySet<string>): EditCommand {
         busEntries: doc.busEntries.filter((be, i) => !ids.has(refId('busentry', be.uuid, i))),
         images: doc.images.filter((im, i) => !ids.has(refId('image', im.uuid, i))),
         graphics: doc.graphics.filter((_, i) => !ids.has(refId('graphic', undefined, i))),
+        textBoxes: doc.textBoxes.filter((tb, i) => !ids.has(refId('textbox', tb.uuid, i))),
       };
     },
     invert(before: Schematic): EditCommand {
@@ -157,6 +162,19 @@ export function replaceSheet(index: number, next: SchSheet): EditCommand {
     },
     invert(before: Schematic): EditCommand {
       return replaceSheet(index, before.sheets[index]!);
+    },
+  };
+}
+
+/** Replace the text box at `index` with `next` (e.g. after editing its text). */
+export function replaceTextBox(index: number, next: SchTextBox): EditCommand {
+  return {
+    label: 'Edit Text Box',
+    apply(doc: Schematic): Schematic {
+      return { ...doc, textBoxes: doc.textBoxes.map((t, i) => (i === index ? next : t)) };
+    },
+    invert(before: Schematic): EditCommand {
+      return replaceTextBox(index, before.textBoxes[index]!);
     },
   };
 }

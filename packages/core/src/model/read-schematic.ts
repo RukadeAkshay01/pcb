@@ -38,6 +38,7 @@ import type {
   SchNoConnect,
   SchSheet,
   SchSymbol,
+  SchTextBox,
   SheetPin,
   Stroke,
   TextEffects,
@@ -468,6 +469,49 @@ function readImage(node: SList): SchImage {
   return img;
 }
 
+/**
+ * `(text_box "content" (at x y angle) (size w h) (margins l t r b)
+ *   (stroke ..) (fill ..) (effects ..) (uuid ..))` — SCH_TEXTBOX.
+ * `start` = `(at)`, `end` = start + `(size)`. Legacy 6.99 files used bare
+ * `(start ..)`/`(end ..)`; both are honored (sch_io_kicad_sexpr_parser.cpp).
+ */
+function readTextBox(node: SList): SchTextBox {
+  const { at, angle } = readAt(node);
+  const startNode = childNamed(node, 'start');
+  const start = startNode ? readPoint(startNode, 0) : at;
+  const sizeNode = childNamed(node, 'size');
+  const endNode = childNamed(node, 'end');
+  const end = endNode
+    ? readPoint(endNode, 0)
+    : { x: start.x + mmToIU(numArg(sizeNode ?? node, 0) ?? 0), y: start.y + mmToIU(numArg(sizeNode ?? node, 1) ?? 0) };
+  const tb: { -readonly [K in keyof SchTextBox]: SchTextBox[K] } = {
+    text: arg(node, 0) ?? '',
+    start,
+    end,
+    angle,
+    source: node,
+  };
+  const marginsNode = childNamed(node, 'margins');
+  if (marginsNode) {
+    tb.margins = {
+      left: mmToIU(numArg(marginsNode, 0) ?? 0),
+      top: mmToIU(numArg(marginsNode, 1) ?? 0),
+      right: mmToIU(numArg(marginsNode, 2) ?? 0),
+      bottom: mmToIU(numArg(marginsNode, 3) ?? 0),
+    };
+  }
+  const stroke = readStroke(node);
+  if (stroke) tb.stroke = stroke;
+  const fill = readFill(node);
+  if (fill) tb.fill = fill;
+  const effects = readEffects(node);
+  if (effects) tb.effects = effects;
+  if (childNamed(node, 'exclude_from_sim')) tb.excludedFromSim = boolField(node, 'exclude_from_sim', false);
+  const uuid = stringField(node, 'uuid');
+  if (uuid) tb.uuid = uuid;
+  return tb;
+}
+
 function readNoConnect(node: SList): SchNoConnect {
   const { at } = readAt(node);
   const nc: { -readonly [K in keyof SchNoConnect]: SchNoConnect[K] } = { at, source: node };
@@ -547,6 +591,7 @@ export function readSchematic(root: SList): Schematic {
   const busEntries: SchBusEntry[] = [];
   const images: SchImage[] = [];
   const graphics: LibGraphic[] = [];
+  const textBoxes: SchTextBox[] = [];
 
   const libSymbolsNode = childNamed(root, 'lib_symbols');
   if (libSymbolsNode) {
@@ -570,6 +615,7 @@ export function readSchematic(root: SList): Schematic {
       const g = readGraphic(item, false); // sheet coordinates: +Y down, no invert
       if (g) graphics.push(g);
     }
+    else if (name === 'text_box') textBoxes.push(readTextBox(item));
     else if (LABEL_KINDS[name]) labels.push(readLabel(item, LABEL_KINDS[name]!));
   }
 
@@ -585,6 +631,7 @@ export function readSchematic(root: SList): Schematic {
     busEntries,
     images,
     graphics,
+    textBoxes,
     source: root,
   };
   const generator = stringField(root, 'generator');

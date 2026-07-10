@@ -10,7 +10,7 @@ import { contains, inflate, labelBox, symbolBodyBBox } from './bbox.js';
 
 /** A reference to a top-level, selectable schematic item. */
 export interface ItemRef {
-  kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic';
+  kind: 'symbol' | 'line' | 'junction' | 'noconnect' | 'label' | 'sheet' | 'busentry' | 'image' | 'graphic' | 'textbox';
   /** Stable identity: the item's uuid, or `idx:<n>` when one is absent. */
   id: string;
 }
@@ -132,6 +132,17 @@ export function hitTest(
     const halfH = 20 * IU_PER_PIXEL * im.scale;
     if (Math.abs(p.x - im.at.x) <= halfW + accuracy && Math.abs(p.y - im.at.y) <= halfH + accuracy)
       return { kind: 'image', id: refId('image', im.uuid, i) };
+  }
+
+  // Text boxes: KiCad's SCH_TEXTBOX::HitTest matches any point in the bounding
+  // box (rect.Contains), so the whole box selects. Tested late (like sheets) so
+  // smaller items drawn over it win first.
+  for (let i = 0; i < sch.textBoxes.length; i++) {
+    const tb = sch.textBoxes[i]!;
+    const x0 = Math.min(tb.start.x, tb.end.x), x1 = Math.max(tb.start.x, tb.end.x);
+    const y0 = Math.min(tb.start.y, tb.end.y), y1 = Math.max(tb.start.y, tb.end.y);
+    if (p.x >= x0 - accuracy && p.x <= x1 + accuracy && p.y >= y0 - accuracy && p.y <= y1 + accuracy)
+      return { kind: 'textbox', id: refId('textbox', tb.uuid, i) };
   }
 
   // Sheets last: their rectangle is large, so smaller items inside win first

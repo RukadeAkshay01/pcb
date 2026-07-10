@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { parse, serialize } from '../src/sexpr/index.js';
 import { readSchematic } from '../src/model/read-schematic.js';
+import { writeSchematic } from '../src/model/write-schematic.js';
 import { makeBus, makeLabel } from '../src/edit/build.js';
+import { makeTextBox } from '../src/edit/build-graphics.js';
 import { addItems } from '../src/edit/mutate.js';
 import { mmToIU } from '../src/units.js';
 
@@ -53,5 +55,38 @@ describe('makeLabel', () => {
     const back = readSchematic(parse(`(kicad_sch (version 1) (lib_symbols) ${serialize(g.source)})`));
     expect(back.labels[0]!.kind).toBe('global_label');
     expect(back.labels[0]!.shape).toBe('bidirectional');
+  });
+});
+
+describe('makeTextBox', () => {
+  it('builds a (text_box ...) node with at/size/margins/effects', () => {
+    const tb = makeTextBox(at(10, 20), at(50, 40), 'Hello world');
+    const s = serialize(tb.source);
+    expect(s).toContain('(text_box "Hello world"');
+    expect(s).toContain('(at 10 20 0)');
+    expect(s).toContain('(size 40 20)'); // end - start
+    expect(s).toContain('(margins');
+    expect(s).toContain('(justify left top)');
+  });
+
+  it('round-trips through read/write, preserving text and corners', () => {
+    const tb = makeTextBox(at(10, 20), at(50, 40), 'Note A');
+    const doc = addItems({ textBoxes: [tb] }).apply(EMPTY());
+    expect(doc.textBoxes).toHaveLength(1);
+    const text = serialize(writeSchematic(doc));
+    const back = readSchematic(parse(text));
+    expect(back.textBoxes).toHaveLength(1);
+    expect(back.textBoxes[0]!.text).toBe('Note A');
+    expect(back.textBoxes[0]!.start).toEqual(at(10, 20));
+    expect(back.textBoxes[0]!.end).toEqual(at(50, 40));
+  });
+
+  it('adds and deletes undoably (addItems inverse)', () => {
+    const tb = makeTextBox(at(0, 0), at(20, 10), 'X');
+    const cmd = addItems({ textBoxes: [tb] });
+    const doc = cmd.apply(EMPTY());
+    expect(doc.textBoxes).toHaveLength(1);
+    const undone = cmd.invert(EMPTY()).apply(doc);
+    expect(undone.textBoxes).toHaveLength(0);
   });
 });
