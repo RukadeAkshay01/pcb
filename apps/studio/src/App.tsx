@@ -4,6 +4,7 @@ import { HomePage } from './home/HomePage.js';
 import { SchematicEditor, type PickedFile } from './editors/schematic/SchematicEditor.js';
 import { PcbEditor } from './editors/pcb/PcbEditor.js';
 import { SymbolEditor } from './editors/symbol/SymbolEditor.js';
+import { FootprintEditor } from './editors/footprint/FootprintEditor.js';
 import { storageAvailable, listProjects, loadProject, updateProjectFiles } from './home/projectStore.js';
 import { saveSession, loadSession } from './home/session.js';
 import './ui/shell.css';
@@ -28,7 +29,7 @@ const pcbBasename = (p: string): string => p.split('/').pop()!.split('\\').pop()
  * with CSS so heavy documents are parsed only once.
  */
 export function App(): JSX.Element {
-  const [view, setView] = useState<'home' | 'schematic' | 'pcb' | 'symbols'>('home');
+  const [view, setView] = useState<'home' | 'schematic' | 'pcb' | 'symbols' | 'footprints'>('home');
   const [projectFiles, setProjectFiles] = useState<PickedFile[] | null>(null);
   const [startFile, setStartFile] = useState<string | null>(null);
   // A board opened directly (no schematic project around it).
@@ -36,6 +37,7 @@ export function App(): JSX.Element {
   const [schMounted, setSchMounted] = useState(false);
   const [pcbMounted, setPcbMounted] = useState(false);
   const [symMounted, setSymMounted] = useState(false);
+  const [fpMounted, setFpMounted] = useState(false);
   // "Add symbol to schematic": the symbol editor hands eeschema a symbol to place.
   const [placeRequest, setPlaceRequest] = useState<{ lib: LibSymbol; nonce: number } | null>(null);
   // Restore the last view on reload: reopen the most-recently-opened project
@@ -59,6 +61,7 @@ export function App(): JSX.Element {
         if (s.view === 'schematic') setSchMounted(true);
         else if (s.view === 'pcb') setPcbMounted(true);
         else if (s.view === 'symbols') setSymMounted(true);
+        else if (s.view === 'footprints') setFpMounted(true);
         setView(s.view);
       } catch { /* fall back to home */ } finally {
         setRestoring(false);
@@ -157,6 +160,10 @@ export function App(): JSX.Element {
           if (files) { setProjectFiles(files); setStandalonePcb(null); }
           setSymMounted(true); setView('symbols');
         }}
+        onOpenFootprintEditor={(files) => {
+          if (files) { setProjectFiles(files); setStandalonePcb(null); }
+          setFpMounted(true); setView('footprints');
+        }}
       />
     );
   }
@@ -195,6 +202,14 @@ export function App(): JSX.Element {
             initialProject={projectFiles}
             onAddSymbolToSchematic={addSymbolToSchematic}
             projectName={projectName}
+          />
+        </div>
+      )}
+      {fpMounted && (
+        <div style={{ display: view === 'footprints' ? 'contents' : 'none' }}>
+          <FootprintEditor
+            onExitToHome={goHome}
+            initialProject={projectFiles}
           />
         </div>
       )}

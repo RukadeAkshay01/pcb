@@ -33,7 +33,7 @@ const TILES: Tile[] = [
   { id: 'schematic', name: 'Schematic Editor', desc: 'Edit the project schematic', enabled: true },
   { id: 'symbols', name: 'Symbol Editor', desc: 'Edit global and/or project schematic symbol libraries', enabled: true },
   { id: 'pcb', name: 'PCB Editor', desc: 'Edit the project PCB design' },
-  { id: 'footprints', name: 'Footprint Editor', desc: 'Edit global and/or project PCB footprint libraries' },
+  { id: 'footprints', name: 'Footprint Editor', desc: 'Edit global and/or project PCB footprint libraries', enabled: true },
   { id: 'gerber', name: 'Gerber Viewer', desc: 'Preview Gerber files' },
   { id: 'image', name: 'Image Converter', desc: 'Convert bitmap images to schematic symbols or PCB footprints' },
   { id: 'calculator', name: 'Calculator Tools', desc: 'Show tools for calculating resistance, current capacity, etc.' },
@@ -295,12 +295,14 @@ function buildDirTree(files: PickedHomeFile[], stripPrefix: string, projLower: s
  * desktop app's project window. Until a project is opened, the bundled demo
  * project is shown.
  */
-export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymbolEditor, initialFiles }: {
+export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymbolEditor, onOpenFootprintEditor, initialFiles }: {
   onOpenSchematic: () => void;
   onOpenProject?: (files: PickedHomeFile[], startFile?: string) => void;
   onOpenPcb?: (file: PickedHomeFile, files?: PickedHomeFile[]) => void;
   /** Launch the Symbol Editor (with the open project's libraries, if any). */
   onOpenSymbolEditor?: (files?: PickedHomeFile[]) => void;
+  /** Launch the Footprint Editor (with the open project's `.pretty` libraries, if any). */
+  onOpenFootprintEditor?: (files?: PickedHomeFile[]) => void;
   /** A project already open in the app: keep it in the tree on return to home. */
   initialFiles?: PickedHomeFile[] | null;
 }): JSX.Element {
@@ -848,6 +850,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
               const enabled = implemented && (!needsProject || (t.id === 'schematic' ? hasSch : hasPcb));
               const launch = t.id === 'pcb' ? launchPcb
                 : t.id === 'symbols' ? (): void => onOpenSymbolEditor?.(picked ?? undefined)
+                : t.id === 'footprints' ? (): void => onOpenFootprintEditor?.(picked ?? undefined)
                 : (): void => launchSchematic();
               return (
                 <button

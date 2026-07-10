@@ -122,4 +122,5 @@ export { SCH_IU_PER_MM, mmToIU, iuToMM } from './units.js';
 
 // --- PCB (board) -------------------------------------------------------------
 export * from './pcb/types.js';
-export { readBoard, rotatePcb, tessellateArc, arcCenter } from './pcb/read-board.js';
+export { readBoard, readFootprintFile, rotatePcb, tessellateArc, arcCenter } from './pcb/read-board.js';
+export { serializeFootprint, writeFootprintNode, buildPadNode, buildShapeNode, buildTextNode, FOOTPRINT_FILE_VERSION } from './pcb/write-footprint.js';

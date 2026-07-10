@@ -299,13 +299,30 @@ function readPad(item: SList, t: FpTransform | null): PcbPad | null {
   };
 }
 
-function readFootprint(item: SList): PcbFootprint | null {
+/**
+ * Read a standalone `.kicad_mod` file (a top-level `(footprint …)` node) into a
+ * footprint in its own LOCAL frame — the form the Footprint Editor works in.
+ * A library footprint carries no board placement, so children keep their stored
+ * (footprint-relative) coordinates: no transform is baked in and the anchor sits
+ * at the origin. This is the library-cache load path of KiCad's
+ * `PCB_IO_KICAD_SEXPR_PARSER::parseFOOTPRINT` (the footprint is not re-based onto
+ * a board), as opposed to `readFootprint`, which bakes children to board coords.
+ */
+export function readFootprintFile(root: SList): PcbFootprint | null {
+  const h = head(root);
+  if (h !== 'footprint' && h !== 'module') return null;
+  return readFootprint(root, true);
+}
+
+function readFootprint(item: SList, local = false): PcbFootprint | null {
   const lib = arg(item, 0) ?? '';
   const at = childNamed(item, 'at');
-  const pos = ptAt(at);
+  const pos = ptAt(at) ?? (local ? { x: 0, y: 0 } : undefined);
   if (!pos) return null;
-  const angle = at ? (numArg(at, 2) ?? 0) : 0;
-  const t: FpTransform = { pos, angle };
+  const angle = local ? 0 : (at ? (numArg(at, 2) ?? 0) : 0);
+  // On a board, children are baked to board coords through the placement
+  // transform (legacy RebakeFromLib); a library footprint keeps local coords.
+  const t: FpTransform | null = local ? null : { pos, angle };
   const fp: PcbFootprint = {
     lib,
     at: pos,

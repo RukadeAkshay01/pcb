@@ -60,6 +60,14 @@ const BITMAP: Record<string, string> = {
   importSymbol: 'import', exportSymbol: 'export_file', cut: 'cut', copy: 'copy', library: 'library',
   editWithLibEdit: 'edit_cmp_symb_links',
   preferences: 'preference',
+  // footprint editor (icons per PCB_ACTIONS/ACTIONS .Icon() in toolbars_footprint_editor.cpp).
+  // KiCad's footprint-specific bitmaps aren't all vendored yet, so these reuse the
+  // closest available SVGs (a footprint glyph, sketch/props icons, import/export…).
+  newFootprint: 'module', createFootprint: 'new_generic',
+  footprintProperties: 'part_properties', padTable: 'spreadsheet',
+  defaultPadProperties: 'pad_sketch', checkFootprint: 'erc', placePad: 'pad_sketch',
+  loadFpFromBoard: 'import', saveFpToBoard: 'export_file',
+  setAnchor: 'anchor', graphicsOutlines: 'pad_sketch', textOutlines: 'text_sketch',
 };
 
 /** KiCad icon URL for a toolbar tool id, or undefined if none is mapped. */
