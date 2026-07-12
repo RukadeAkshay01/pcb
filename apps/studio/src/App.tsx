@@ -40,6 +40,11 @@ export function App(): JSX.Element {
   const [fpMounted, setFpMounted] = useState(false);
   // "Add symbol to schematic": the symbol editor hands eeschema a symbol to place.
   const [placeRequest, setPlaceRequest] = useState<{ lib: LibSymbol; nonce: number } | null>(null);
+  // The file the project manager double-clicked into the footprint / symbol
+  // editor (KiCad's MAIL_FP_EDIT / MAIL_LIB_EDIT). Re-sent with a fresh nonce
+  // each activation so a resident editor re-opens on the newly-picked file.
+  const [fpRequest, setFpRequest] = useState<{ file: string | null; nonce: number } | null>(null);
+  const [symRequest, setSymRequest] = useState<{ file: string | null; nonce: number } | null>(null);
   // Restore the last view on reload: reopen the most-recently-opened project
   // (top of Recent) into the saved view, so a refresh doesn't lose your work.
   // On reload, reopen the most-recently-opened project (top of Recent) — into
@@ -156,13 +161,15 @@ export function App(): JSX.Element {
           else { setStandalonePcb(file); setProjectFiles(null); }
           setPcbMounted(true); setView('pcb');
         }}
-        onOpenSymbolEditor={(files) => {
+        onOpenSymbolEditor={(files, startFile) => {
           if (files) { setProjectFiles(files); setStandalonePcb(null); }
           setSymMounted(true); setView('symbols');
+          setSymRequest((prev) => ({ file: startFile ?? null, nonce: (prev?.nonce ?? 0) + 1 }));
         }}
-        onOpenFootprintEditor={(files) => {
+        onOpenFootprintEditor={(files, startFile) => {
           if (files) { setProjectFiles(files); setStandalonePcb(null); }
           setFpMounted(true); setView('footprints');
+          setFpRequest((prev) => ({ file: startFile ?? null, nonce: (prev?.nonce ?? 0) + 1 }));
         }}
       />
     );
@@ -202,6 +209,7 @@ export function App(): JSX.Element {
             initialProject={projectFiles}
             onAddSymbolToSchematic={addSymbolToSchematic}
             projectName={projectName}
+            openRequest={symRequest}
           />
         </div>
       )}
@@ -210,6 +218,7 @@ export function App(): JSX.Element {
           <FootprintEditor
             onExitToHome={goHome}
             initialProject={projectFiles}
+            openRequest={fpRequest}
           />
         </div>
       )}

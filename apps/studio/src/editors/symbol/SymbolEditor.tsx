@@ -88,13 +88,16 @@ function flattenAgainst(sym: LibSymbol, lib: ManagedLibrary, depth = 0): LibSymb
   };
 }
 
-export function SymbolEditor({ onExitToHome, initialProject, onAddSymbolToSchematic, projectName }: {
+export function SymbolEditor({ onExitToHome, initialProject, onAddSymbolToSchematic, projectName, openRequest }: {
   onExitToHome: () => void;
   initialProject?: SymbolEditorFile[] | null;
   /** eeschema wiring for "Add symbol to schematic" (SCH_ACTIONS::addSymbolToSchematic). */
   onAddSymbolToSchematic?: (sym: LibSymbol) => void;
   /** Project name shown as "<project> — Symbol Editor" in the menu bar. */
   projectName?: string;
+  /** The `.kicad_sym` the project manager launched us on (KiCad's MAIL_LIB_EDIT).
+   *  Re-sent with a fresh nonce each activation so a resident editor re-opens. */
+  openRequest?: { file: string | null; nonce: number } | null;
 }): JSX.Element {
   const manager = useRef(new SymbolLibraryManager());
   const theme = useSchematicTheme();
@@ -243,6 +246,26 @@ export function SymbolEditor({ onExitToHome, initialProject, onAddSymbolToSchema
       setLoading(null);
     }
   }, [bump]);
+
+  // Open the specific library the project manager launched us on — KiCad's
+  // PROJECT_TREE_ITEM::Activate routing a `.kicad_sym` through editSymbols +
+  // MAIL_LIB_EDIT. A `.kicad_sym` is a whole library, so select it in the tree
+  // (like KiCad highlighting the library node) and load its first symbol so the
+  // canvas isn't blank. Runs after the bootstrap effect registered the library.
+  useEffect(() => {
+    const file = openRequest?.file;
+    if (!file) return;
+    const lib = basename(file).replace(/\.kicad_sym$/i, '');
+    void (async () => {
+      const loaded = await manager.current.ensureLoaded(lib);
+      if (!loaded) return;
+      setExpanded((s) => new Set(s).add(lib));
+      const first = manager.current.symbolNames(lib)[0];
+      setTreeSel({ lib, name: first ?? null });
+      if (first) void loadSymbol(lib, first);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest?.nonce]);
 
   // ----- save / revert ------------------------------------------------------------
   const downloadText = (fileName: string, text: string): void => {

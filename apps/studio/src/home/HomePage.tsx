@@ -299,10 +299,12 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
   onOpenSchematic: () => void;
   onOpenProject?: (files: PickedHomeFile[], startFile?: string) => void;
   onOpenPcb?: (file: PickedHomeFile, files?: PickedHomeFile[]) => void;
-  /** Launch the Symbol Editor (with the open project's libraries, if any). */
-  onOpenSymbolEditor?: (files?: PickedHomeFile[]) => void;
-  /** Launch the Footprint Editor (with the open project's `.pretty` libraries, if any). */
-  onOpenFootprintEditor?: (files?: PickedHomeFile[]) => void;
+  /** Launch the Symbol Editor (with the open project's libraries, if any).
+   *  `startFile` is a `.kicad_sym` to open straight away (KiCad's MAIL_LIB_EDIT). */
+  onOpenSymbolEditor?: (files?: PickedHomeFile[], startFile?: string) => void;
+  /** Launch the Footprint Editor (with the open project's `.pretty` libraries, if any).
+   *  `startFile` is a `.kicad_mod` to open straight away (KiCad's MAIL_FP_EDIT). */
+  onOpenFootprintEditor?: (files?: PickedHomeFile[], startFile?: string) => void;
   /** A project already open in the app: keep it in the tree on return to home. */
   initialFiles?: PickedHomeFile[] | null;
 }): JSX.Element {
@@ -673,17 +675,30 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
     if (isHiddenNode(node.name)) return null;
     const isPcb = /\.kicad_pcb$/i.test(node.name);
     const isSch = /\.kicad_sch$/i.test(node.name);
+    const isSym = /\.kicad_sym$/i.test(node.name);
+    const isMod = /\.kicad_mod$/i.test(node.name);
+    // KiCad's PROJECT_TREE_ITEM::Activate: each document type routes to the
+    // editor it belongs to (a `.kicad_mod` to the Footprint Editor, a
+    // `.kicad_sym` to the Symbol Editor, a board to pcbnew, a sheet to eeschema).
     const openFn =
       isPcb && onOpenPcb && node.file ? () => onOpenPcb(node.file!, picked ?? undefined)
       : isSch ? () => launchSchematic(basename(node.name))
+      : isSym && onOpenSymbolEditor && node.file ? () => onOpenSymbolEditor(picked ?? undefined, node.file!.name)
+      : isMod && onOpenFootprintEditor && node.file ? () => onOpenFootprintEditor(picked ?? undefined, node.file!.name)
       : undefined;
+    const openTitle =
+      isPcb ? 'Double-click to open in the PCB Editor'
+      : isSch ? 'Double-click to open in the Schematic Editor'
+      : isSym ? 'Double-click to open in the Symbol Editor'
+      : isMod ? 'Double-click to open in the Footprint Editor'
+      : node.path;
     // KiCad's project tree: single click selects, double click opens the file.
     return (
       <div
         key={node.path}
         className={`ze-tree-item${selected === node.path ? ' active' : ''}`}
         style={{ paddingLeft: 8 + depth * 16 + 15, cursor: openFn ? 'pointer' : 'default' }}
-        title={isPcb ? 'Double-click to open in the PCB Editor' : isSch ? 'Double-click to open in the Schematic Editor' : node.path}
+        title={openTitle}
         onClick={() => setSelected(node.path)}
         onDoubleClick={openFn}
       >

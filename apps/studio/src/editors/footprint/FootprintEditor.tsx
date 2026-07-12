@@ -80,9 +80,26 @@ function newFootprint(name: string): PcbFootprint {
   };
 }
 
-export function FootprintEditor({ onExitToHome, initialProject }: {
+/**
+ * Resolve a project `.kicad_mod` path (the file the project manager
+ * double-clicked — KiCad's MAIL_FP_EDIT packet) to the library nickname and
+ * footprint name the manager keys it under. Mirrors the bootstrap grouping:
+ * a footprint's library is its `.pretty` directory, its name the file basename.
+ */
+function fpTargetOf(path: string): { lib: string; name: string } {
+  const norm = path.replace(/\\/g, '/');
+  const m = /([^/]+)\.pretty\//i.exec(norm);
+  const dir = m ? `${m[1]}.pretty` : norm.split('/').slice(0, -1).join('/') || 'Project';
+  const lib = dir.replace(/\.pretty$/i, '').split('/').pop()!;
+  return { lib, name: fpNameOf(norm) };
+}
+
+export function FootprintEditor({ onExitToHome, initialProject, openRequest }: {
   onExitToHome: () => void;
   initialProject?: FootprintEditorFile[] | null;
+  /** The `.kicad_mod` the project manager launched us on (KiCad's MAIL_FP_EDIT).
+   *  Re-sent with a fresh nonce each activation so a resident editor re-opens. */
+  openRequest?: { file: string | null; nonce: number } | null;
 }): JSX.Element {
   const manager = useRef(new FootprintLibraryManager());
   const [revision, setRevision] = useState(0);
@@ -177,6 +194,25 @@ export function FootprintEditor({ onExitToHome, initialProject }: {
       setLoading(null);
     }
   }, [bump]);
+
+  // Open the specific footprint the project manager launched us on — KiCad's
+  // PROJECT_TREE_ITEM::Activate routing a `.kicad_mod` through editFootprints +
+  // MAIL_FP_EDIT. Resolve its `.pretty` library and name, expand and select it
+  // in the library tree, and load it onto the canvas. Runs after the bootstrap
+  // effect has registered the project libraries (same mount, declared earlier).
+  useEffect(() => {
+    const file = openRequest?.file;
+    if (!file) return;
+    const { lib, name } = fpTargetOf(file);
+    if (!manager.current.libraryExists(lib)) return;
+    const names = manager.current.footprintNames(lib);
+    const target = names.find((n) => n.toLowerCase() === name.toLowerCase()) ?? names[0];
+    if (!target) return;
+    setExpanded((s) => new Set(s).add(lib));
+    setTreeSel({ lib, name: target });
+    void loadFootprint(lib, target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest?.nonce]);
 
   // ----- undoable edits ---------------------------------------------------------
   /** Commit one edit: snapshot for undo, buffer to the manager, mark modified. */
