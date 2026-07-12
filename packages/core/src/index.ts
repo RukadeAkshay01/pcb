@@ -147,3 +147,20 @@ export {
   serializeBoard, writeBoardNode,
   buildTrackNode, buildArcTrackNode, buildViaNode, buildBoardShapeNode, buildBoardTextNode,
 } from './pcb/write-board.js';
+
+// --- Drawing sheet (page layout / pl_editor) ---------------------------------
+export * as wks from './wks/index.js';
+export {
+  readDrawingSheet, parseDrawingSheet, writeDrawingSheet, serializeDrawingSheet,
+  defaultDrawingSheet, emptyDrawingSheet,
+  layoutDrawingSheet, resolveDrawingSheetText, incrementLabel,
+  drawItemBBox, pickDrawItem, translateItem,
+  itemBBox as wksItemBBox, itemsInBox as wksItemsInBox, replaceItem as replaceWksItem,
+  DEFAULT_SETUP, WKS_FILE_VERSION,
+  type WksSheet, type WksItem, type WksLine, type WksRect, type WksText, type WksBitmap, type WksPoly,
+  type WksSetup, type WksCorner, type WksOption, type WksHJustify, type WksVJustify,
+  type WksPoint, type WksXY, type WksItemType, type WksItemBase,
+  type WksPage, type WksResolveContext,
+  type DsDrawItem, type DsLineItem, type DsTextItem, type DsPolyItem, type DsBitmapItem,
+  type WksBBox,
+} from './wks/index.js';

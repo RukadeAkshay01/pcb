@@ -68,6 +68,9 @@ const BITMAP: Record<string, string> = {
   defaultPadProperties: 'pad_sketch', checkFootprint: 'erc', placePad: 'pad_sketch',
   loadFpFromBoard: 'import', saveFpToBoard: 'export_file',
   setAnchor: 'anchor', graphicsOutlines: 'pad_sketch', textOutlines: 'text_sketch',
+  // drawing sheet editor (icons per PL_EDITOR_FRAME actions, toolbars_pl_editor.cpp)
+  dsAddLine: 'add_graphical_segments', dsAddRect: 'add_rectangle', dsAddText: 'text',
+  dsAddBitmap: 'image', dsAppend: 'import', dsDelete: 'delete_cursor', appendSheet: 'import',
 };
 
 /** KiCad icon URL for a toolbar tool id, or undefined if none is mapped. */

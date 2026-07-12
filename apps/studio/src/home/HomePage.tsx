@@ -37,7 +37,7 @@ const TILES: Tile[] = [
   { id: 'gerber', name: 'Gerber Viewer', desc: 'Preview Gerber files' },
   { id: 'image', name: 'Image Converter', desc: 'Convert bitmap images to schematic symbols or PCB footprints' },
   { id: 'calculator', name: 'Calculator Tools', desc: 'Show tools for calculating resistance, current capacity, etc.' },
-  { id: 'drawingsheet', name: 'Drawing Sheet Editor', desc: 'Edit drawing sheet borders and title blocks for use in schematics and PCB designs' },
+  { id: 'drawingsheet', name: 'Drawing Sheet Editor', desc: 'Edit drawing sheet borders and title blocks for use in schematics and PCB designs', enabled: true },
   { id: 'pcm', name: 'Plugin and Content Manager', desc: 'Manage downloadable packages from KiCad and 3rd party repositories' },
 ];
 
@@ -295,7 +295,7 @@ function buildDirTree(files: PickedHomeFile[], stripPrefix: string, projLower: s
  * desktop app's project window. Until a project is opened, the bundled demo
  * project is shown.
  */
-export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymbolEditor, onOpenFootprintEditor, initialFiles }: {
+export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymbolEditor, onOpenFootprintEditor, onOpenDrawingSheetEditor, initialFiles }: {
   onOpenSchematic: () => void;
   onOpenProject?: (files: PickedHomeFile[], startFile?: string) => void;
   onOpenPcb?: (file: PickedHomeFile, files?: PickedHomeFile[]) => void;
@@ -305,6 +305,8 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
   /** Launch the Footprint Editor (with the open project's `.pretty` libraries, if any).
    *  `startFile` is a `.kicad_mod` to open straight away (KiCad's MAIL_FP_EDIT). */
   onOpenFootprintEditor?: (files?: PickedHomeFile[], startFile?: string) => void;
+  /** Launch the Drawing Sheet Editor (pl_editor); a standalone tool. */
+  onOpenDrawingSheetEditor?: () => void;
   /** A project already open in the app: keep it in the tree on return to home. */
   initialFiles?: PickedHomeFile[] | null;
 }): JSX.Element {
@@ -866,6 +868,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
               const launch = t.id === 'pcb' ? launchPcb
                 : t.id === 'symbols' ? (): void => onOpenSymbolEditor?.(picked ?? undefined)
                 : t.id === 'footprints' ? (): void => onOpenFootprintEditor?.(picked ?? undefined)
+                : t.id === 'drawingsheet' ? (): void => onOpenDrawingSheetEditor?.()
                 : (): void => launchSchematic();
               return (
                 <button
