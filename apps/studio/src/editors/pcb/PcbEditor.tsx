@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { parse, readBoard, iuToMM, type Board } from '@ziroeda/core';
+import { parse, readBoard, iuToMM, hitTestBoard, boardItemBBox, parseBoardItemId, type Board } from '@ziroeda/core';
 import { MenuBar, type Menu } from '../../ui/MenuBar.js';
 import { Toolbar } from '../../ui/Toolbar.js';
 import { buildScene, buildDrawSteps, DEFAULT_DRAW_OPTIONS, type BoardScene, type PcbDrawOptions, type SheetInfo } from './renderBoard.js';
@@ -108,6 +108,8 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
   const [selFilter, setSelFilter] = useState<Set<string>>(new Set(PCB_FILTER_CATS.map((c) => c[0])));
   const [netQuery, setNetQuery] = useState('');
   const [activeTool, setActiveTool] = useState('select');
+  // Selected board items (PCB_SELECTION_TOOL's selection), by `${kind}:${index}` id.
+  const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   const [show3D, setShow3D] = useState(false);
   const viewer3dRef = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -116,6 +118,9 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
   const wrapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef({ scale: 0.005, tx: 0, ty: 0 });
   const boardRef = useRef<Board | null>(null);
+  // Live selection read by draw()'s overlay pass without re-creating the callback.
+  const selForDrawRef = useRef<ReadonlySet<string>>(selection);
+  selForDrawRef.current = selection;
   const sceneRef = useRef<BoardScene | null>(null);
   const rafRef = useRef(0);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -252,6 +257,26 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
       ctx.imageSmoothingEnabled = true;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
+    // Selection highlight: dashed boxes around selected items (drawn on top of
+    // the raster in device-pixel space, like the footprint editor's overlay).
+    const sel = selForDrawRef.current;
+    const brd = boardRef.current;
+    if (brd && sel.size > 0) {
+      const toPx = (p: { x: number; y: number }): { x: number; y: number } => ({ x: p.x * v.scale + v.tx, y: p.y * v.scale + v.ty });
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.setLineDash([4 * dpr, 3 * dpr]);
+      for (const id of sel) {
+        const b = boardItemBBox(brd, id);
+        if (!b) continue;
+        const p0 = toPx({ x: b.minX, y: b.minY });
+        const p1 = toPx({ x: b.maxX, y: b.maxY });
+        const pad = 2 * dpr;
+        ctx.strokeRect(Math.min(p0.x, p1.x) - pad, Math.min(p0.y, p1.y) - pad,
+          Math.abs(p1.x - p0.x) + 2 * pad, Math.abs(p1.y - p0.y) + 2 * pad);
+      }
+      ctx.setLineDash([]);
+    }
     setScale(v.scale);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startCrispRender]);
@@ -266,6 +291,9 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
     cacheRef.current = null;
     requestDraw();
   }, [visible, drawOpts, requestDraw]);
+
+  // The selection lives only in the overlay, not the raster — just repaint.
+  useEffect(() => { requestDraw(); }, [selection, requestDraw]);
 
   const zoomToFit = useCallback(() => {
     const canvas = canvasRef.current;
@@ -353,10 +381,39 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [dpr, requestDraw]);
 
+  // World coordinate under a pointer event (device pixels → board units).
+  const worldAt = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const v = viewRef.current;
+    return { x: ((clientX - rect.left) * dpr - v.tx) / v.scale, y: ((clientY - rect.top) * dpr - v.ty) / v.scale };
+  }, [dpr]);
+
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // The press that may become a click-select: its origin + whether it moved
+  // (a moved left press is a pan, a still one is a click — PCB_SELECTION_TOOL).
+  const downRef = useRef<{ x: number; y: number; button: number; moved: boolean } | null>(null);
+
+  // PCB_SELECTION_TOOL::selectPoint: hit-test under the cursor and update the
+  // selection. Shift adds/toggles (m_additive); a plain click on empty clears.
+  const clickSelect = useCallback((clientX: number, clientY: number, additive: boolean): void => {
+    const w = worldAt(clientX, clientY);
+    const brd = boardRef.current;
+    if (!w || !brd) return;
+    const tol = (5 * dpr) / viewRef.current.scale; // ~5px accuracy, like COLLECTORS_GUIDE
+    const id = hitTestBoard(brd, w, tol);
+    setSelection((prev) => {
+      const next = new Set(additive ? prev : []);
+      if (id) { if (additive && next.has(id)) next.delete(id); else next.add(id); }
+      return next;
+    });
+  }, [worldAt, dpr]);
+
   const onPointerDown = (e: React.PointerEvent): void => {
     if (e.button === 0 || e.button === 1) {
       dragRef.current = { x: e.clientX, y: e.clientY };
+      downRef.current = { x: e.clientX, y: e.clientY, button: e.button, moved: false };
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     }
   };
@@ -369,6 +426,9 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
       const wy = ((e.clientY - rect.top) * dpr - v.ty) / v.scale;
       setCursor({ x: wx, y: wy });
     }
+    // Past a few pixels the press is a drag (pan), not a click-select.
+    const d = downRef.current;
+    if (d && !d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 3 * dpr) d.moved = true;
     if (dragRef.current) {
       const v = viewRef.current;
       v.tx += (e.clientX - dragRef.current.x) * dpr;
@@ -377,12 +437,18 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
       requestDraw();
     }
   };
-  const onPointerUp = (): void => { dragRef.current = null; };
+  const onPointerUp = (e: React.PointerEvent): void => {
+    const d = downRef.current;
+    dragRef.current = null;
+    downRef.current = null;
+    // A still left-press is a click: select the item under the cursor.
+    if (d && d.button === 0 && !d.moved) clickSelect(e.clientX, e.clientY, e.shiftKey);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'f' || e.key === 'F') zoomToFit();
-      if (e.key === 'Escape') setShow3D(false);
+      if (e.key === 'Escape') { setShow3D(false); setSelection(new Set()); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -624,7 +690,11 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
             <div className="ze-panel grow">
               <div className="ze-panel-header">Properties</div>
               <div className="ze-panel-body">
-                <div className="ze-muted">No objects selected</div>
+                {selection.size === 0 ? (
+                  <div className="ze-muted">No objects selected</div>
+                ) : (
+                  <PcbSelectionInfo board={board} selection={selection} />
+                )}
               </div>
             </div>
           </div>
@@ -834,6 +904,50 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
         <span className="cell grow">{activeLayer}</span>
         <span className="cell">{unitLabel}</span>
       </div>
+    </div>
+  );
+}
+
+/** Read-only summary of the current selection for the Properties panel — the
+ *  first slice of pcbnew's PCB_PROPERTIES_PANEL (editable fields come later). */
+function PcbSelectionInfo({ board, selection }: { board: Board | null; selection: ReadonlySet<string> }): JSX.Element {
+  const mm = (iu: number): string => iuToMM(iu).toFixed(4);
+  const ids = [...selection];
+
+  if (!board) return <div className="ze-muted">…</div>;
+
+  if (ids.length === 1) {
+    const ref = parseBoardItemId(ids[0]!);
+    const netName = (code: number): string => board.nets.get(code) || `(net ${code})`;
+    const row = (k: string, v: string): JSX.Element => (
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '1px 0' }}>
+        <span className="ze-muted">{k}</span><span>{v}</span>
+      </div>
+    );
+    if (ref) {
+      switch (ref.kind) {
+        case 'track': { const t = board.tracks[ref.index]; if (t) return <div><b>Track</b>{row('Layer', t.layer)}{row('Net', netName(t.net))}{row('Width', `${mm(t.width)} mm`)}</div>; break; }
+        case 'arc': { const a = board.arcs[ref.index]; if (a) return <div><b>Arc (track)</b>{row('Layer', a.layer)}{row('Net', netName(a.net))}{row('Width', `${mm(a.width)} mm`)}</div>; break; }
+        case 'via': { const v = board.vias[ref.index]; if (v) return <div><b>Via</b>{row('Net', netName(v.net))}{row('Size', `${mm(v.size)} mm`)}{row('Drill', `${mm(v.drill)} mm`)}</div>; break; }
+        case 'footprint': { const f = board.footprints[ref.index]; if (f) return <div><b>Footprint</b>{row('Reference', f.reference ?? '—')}{row('Value', f.value ?? '—')}{row('Layer', f.layer)}</div>; break; }
+        case 'zone': { const z = board.zones[ref.index]; if (z) return <div><b>Zone</b>{row('Net', z.netName ?? netName(z.net))}{row('Layers', z.layers.join(', '))}</div>; break; }
+        case 'shape': { const s = board.shapes[ref.index]; if (s) return <div><b>Graphic ({s.kind})</b>{row('Layer', s.layer)}{row('Width', `${mm(s.width)} mm`)}</div>; break; }
+        case 'text': { const t = board.texts[ref.index]; if (t) return <div><b>Text</b>{row('Text', t.text)}{row('Layer', t.layer)}</div>; break; }
+      }
+    }
+  }
+
+  // Multiple items: a per-kind tally (pcbnew's status "N items selected").
+  const counts = new Map<string, number>();
+  for (const id of ids) { const r = parseBoardItemId(id); if (r) counts.set(r.kind, (counts.get(r.kind) ?? 0) + 1); }
+  return (
+    <div>
+      <b>{ids.length} items selected</b>
+      {[...counts].map(([k, n]) => (
+        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+          <span className="ze-muted">{k}</span><span>{n}</span>
+        </div>
+      ))}
     </div>
   );
 }
