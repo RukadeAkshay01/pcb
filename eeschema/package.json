@@ -1,0 +1,17 @@
+{
+  "name": "@ziroeda/eeschema",
+  "version": "0.0.0",
+  "description": "Schematic engine mirroring KiCad's eeschema/: document model, sch_io (kicad_sexpr), connectivity/ERC, editing tools.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ziroeda/common": "workspace:*",
+    "@ziroeda/kimath": "workspace:*",
+    "@ziroeda/sexpr": "workspace:*"
+  }
+}

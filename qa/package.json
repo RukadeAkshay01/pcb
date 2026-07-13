@@ -1,0 +1,24 @@
+{
+  "name": "@ziroeda/qa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Unit tests (KiCad: qa/) — round-trip corpora and engine tests for all packages.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ziroeda/common": "workspace:*",
+    "@ziroeda/core": "workspace:*",
+    "@ziroeda/eeschema": "workspace:*",
+    "@ziroeda/kimath": "workspace:*",
+    "@ziroeda/pcbnew": "workspace:*",
+    "@ziroeda/sexpr": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0"
+  }
+}

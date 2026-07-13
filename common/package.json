@@ -1,0 +1,16 @@
+{
+  "name": "@ziroeda/common",
+  "version": "0.0.0",
+  "description": "Shared EDA classes mirroring KiCad's common/: EDA_SHAPE, EDA_TEXT, units, TRANSFORM, stroke font.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ziroeda/core": "workspace:*",
+    "@ziroeda/kimath": "workspace:*"
+  }
+}

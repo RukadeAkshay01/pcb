@@ -57,31 +57,36 @@ GPL-3.0-or-later. See [LICENSE](./LICENSE).
 
 ## Repository layout
 
+The tree mirrors KiCad's own source layout, directory for directory — see
+**[STRUCTURE.md](./STRUCTURE.md)** for the full mapping.
+
 ```
 ziroeda/
-  packages/
-    core/        # framework-agnostic foundations: sexpr, model, geometry
-  apps/
-    schematic/   # React + Canvas2D schematic viewer/editor
+  kicad/         # app shell (Vite + React): launcher, editor frames, cloud  (KiCad: kicad/)
+  eeschema/      # schematic engine: model, sch_io, connectivity/ERC, tools  (KiCad: eeschema/)
+  pcbnew/        # board engine: BOARD/FOOTPRINT model, pcb_io, editing      (KiCad: pcbnew/)
+  common/        # shared EDA classes: EDA_SHAPE, EDA_TEXT, units, font      (KiCad: common/)
+  libs/
+    kimath/      # math: vector2, eda_angle, trigo                           (KiCad: libs/kimath/)
+    core/        # small shared utilities                                    (KiCad: libs/core/)
+    sexpr/       # lossless S-expression parser/serializer                   (KiCad: libs/sexpr/)
+  qa/            # unit tests (qa/unittests/<module>) + fixtures (qa/data)   (KiCad: qa/)
 ```
 
-### `@ziroeda/schematic`
+### `@ziroeda/kicad` — the app
 
-A React + Canvas2D app that renders a real `.kicad_sch` faithfully: symbols (via
-their library graphics + the placement transform), pins, wires, junctions, labels
-and fields, on a pannable/zoomable canvas with a KiCad-style theme.
-
-It is wrapped in eeschema's window chrome — menu bar, top toolbar, a left
-display-options toolbar, a right drawing-tools toolbar, hierarchy and properties
-panels, and a live status bar (cursor position, grid, units, zoom) — with toolbar
-contents transcribed from KiCad's `toolbars_sch_editor.cpp`. Run it with:
+A React + Canvas2D suite that renders real KiCad files faithfully: the
+schematic editor, symbol editor, PCB editor (with 3D viewer), and footprint
+editor, each wrapped in its KiCad window chrome — menu bar, toolbars, panels,
+and a live status bar — with toolbar contents transcribed from KiCad's own
+`toolbars_*.cpp`. Run it with:
 
 ```bash
-pnpm -C apps/schematic dev      # http://localhost:5173
-pnpm -C apps/schematic build    # typecheck + production build
+pnpm -C kicad dev      # http://localhost:5173
+pnpm -C kicad build    # typecheck + production build
 ```
 
-### `@ziroeda/core`
+### The engine packages
 
 Two layers, both grounded in KiCad's own implementation:
 
@@ -101,8 +106,8 @@ Two layers, both grounded in KiCad's own implementation:
 
 ```bash
 pnpm install
-pnpm -C packages/core test       # run the parser/round-trip tests
-pnpm -C packages/core typecheck
+pnpm -C qa test      # run all unit tests (parser round-trips, model, editing, ERC)
+pnpm -r typecheck    # typecheck every package
 ```
 
 ## Roadmap (schematic capture first)

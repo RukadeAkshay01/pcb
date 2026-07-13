@@ -15,14 +15,47 @@ importers:
         specifier: ^3.0.5
         version: 3.2.6(@types/node@22.20.0)
 
-  apps/studio:
+  common:
+    dependencies:
+      '@ziroeda/core':
+        specifier: workspace:*
+        version: link:../libs/core
+      '@ziroeda/kimath':
+        specifier: workspace:*
+        version: link:../libs/kimath
+
+  eeschema:
+    dependencies:
+      '@ziroeda/common':
+        specifier: workspace:*
+        version: link:../common
+      '@ziroeda/kimath':
+        specifier: workspace:*
+        version: link:../libs/kimath
+      '@ziroeda/sexpr':
+        specifier: workspace:*
+        version: link:../libs/sexpr
+
+  kicad:
     dependencies:
       '@supabase/supabase-js':
         specifier: ^2.110.0
         version: 2.110.1
-      '@ziroeda/core':
+      '@ziroeda/common':
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../common
+      '@ziroeda/eeschema':
+        specifier: workspace:*
+        version: link:../eeschema
+      '@ziroeda/kimath':
+        specifier: workspace:*
+        version: link:../libs/kimath
+      '@ziroeda/pcbnew':
+        specifier: workspace:*
+        version: link:../pcbnew
+      '@ziroeda/sexpr':
+        specifier: workspace:*
+        version: link:../libs/sexpr
       earcut:
         specifier: ^3.2.3
         version: 3.2.3
@@ -61,7 +94,51 @@ importers:
         specifier: ^6.0.7
         version: 6.4.3(@types/node@22.20.0)
 
-  packages/core:
+  libs/core:
+    dependencies:
+      '@ziroeda/kimath':
+        specifier: workspace:*
+        version: link:../kimath
+
+  libs/kimath: {}
+
+  libs/sexpr: {}
+
+  pcbnew:
+    dependencies:
+      '@ziroeda/common':
+        specifier: workspace:*
+        version: link:../common
+      '@ziroeda/core':
+        specifier: workspace:*
+        version: link:../libs/core
+      '@ziroeda/kimath':
+        specifier: workspace:*
+        version: link:../libs/kimath
+      '@ziroeda/sexpr':
+        specifier: workspace:*
+        version: link:../libs/sexpr
+
+  qa:
+    dependencies:
+      '@ziroeda/common':
+        specifier: workspace:*
+        version: link:../common
+      '@ziroeda/core':
+        specifier: workspace:*
+        version: link:../libs/core
+      '@ziroeda/eeschema':
+        specifier: workspace:*
+        version: link:../eeschema
+      '@ziroeda/kimath':
+        specifier: workspace:*
+        version: link:../libs/kimath
+      '@ziroeda/pcbnew':
+        specifier: workspace:*
+        version: link:../pcbnew
+      '@ziroeda/sexpr':
+        specifier: workspace:*
+        version: link:../libs/sexpr
     devDependencies:
       '@types/node':
         specifier: ^22.20.0
