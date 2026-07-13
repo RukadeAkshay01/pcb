@@ -33,6 +33,14 @@ import { archiveEntries, zipArchive, expandArchive } from './project_archiver.js
 import { NewProjectDialog } from './dialogs/dialog_new_project.js';
 import { TemplateDialog } from './dialogs/dialog_template_selector.js';
 import { ProjectTreePane, TreeIcon, mgrUrl } from './project_tree_pane.js';
+import {
+  filesFromFileList,
+  walkDirectoryHandle,
+  walkDroppedEntries,
+  type DirHandle,
+  type DropEntry,
+  type IngestFile,
+} from './project_picker.js';
 
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -201,10 +209,7 @@ export function HomePage({
   // survives a save, archive, and reopen instead of collapsing to sch+pcb. The
   // storage layer gzips text ~10x, so keeping the libs is cheap. The project is
   // persisted to IndexedDB so it survives a reload with no login.
-  const ingest = async (
-    files: { name: string; bytesOf: () => Promise<Uint8Array> }[],
-    persist = true,
-  ): Promise<void> => {
+  const ingest = async (files: IngestFile[], persist = true): Promise<void> => {
     setLoading('Reading files…');
     await nextPaint(); // show the overlay before the main thread gets busy
     try {
@@ -313,12 +318,7 @@ export function HomePage({
 
   const onPicked = async (list: FileList | null): Promise<void> => {
     if (!list || list.length === 0) return;
-    await ingest(
-      [...list].map((f) => ({
-        name: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
-        bytesOf: async () => new Uint8Array(await f.arrayBuffer()),
-      })),
-    );
+    await ingest(filesFromFileList(list));
   };
 
   // Open Project: KiCad opens the .kicad_pro and pulls in the whole project.
@@ -329,39 +329,10 @@ export function HomePage({
   // cancel falls back to the classic webkitdirectory input, which has no such
   // blocklist. Multi-file selection and folder drag-and-drop cover the rest.
   const openProjectPicker = async (): Promise<void> => {
-    interface DirHandle {
-      values: () => AsyncIterable<FsEntry>;
-    }
-    interface FsEntry {
-      kind: string;
-      name: string;
-      getFile: () => Promise<File>;
-      values: () => AsyncIterable<FsEntry>;
-    }
     const w = window as unknown as { showDirectoryPicker?: () => Promise<DirHandle> };
     if (w.showDirectoryPicker) {
       try {
-        const dir = await w.showDirectoryPicker();
-        const files: { name: string; bytesOf: () => Promise<Uint8Array> }[] = [];
-        // Recurse so footprint/3D-model subfolders (CM5IO.pretty, 3d_lib …)
-        // populate the directory tree, not just the top level.
-        const walkHandle = async (
-          handle: DirHandle,
-          prefix: string,
-          depth: number,
-        ): Promise<void> => {
-          for await (const entry of handle.values()) {
-            if (entry.kind === 'file')
-              files.push({
-                name: prefix + entry.name,
-                bytesOf: async () => new Uint8Array(await (await entry.getFile()).arrayBuffer()),
-              });
-            else if (entry.kind === 'directory' && depth < 6)
-              await walkHandle(entry, `${prefix}${entry.name}/`, depth + 1);
-          }
-        };
-        await walkHandle(dir, '', 0);
-        await ingest(files);
+        await ingest(await walkDirectoryHandle(await w.showDirectoryPicker()));
         return;
       } catch (e) {
         // AbortError = the user closed the dialog; anything else (blocked
@@ -376,50 +347,10 @@ export function HomePage({
   // works for Downloads/Desktop) and ingest every file found.
   const onDropProject = async (e: React.DragEvent): Promise<void> => {
     e.preventDefault();
-    interface Entry {
-      isFile: boolean;
-      isDirectory: boolean;
-      name: string;
-      file: (ok: (f: File) => void, err: (e: unknown) => void) => void;
-      createReader: () => { readEntries: (ok: (b: Entry[]) => void, err: () => void) => void };
-    }
-    const readAll = (dir: Entry): Promise<Entry[]> =>
-      new Promise((res) => {
-        const reader = dir.createReader();
-        const all: Entry[] = [];
-        const next = (): void =>
-          reader.readEntries(
-            (batch) => {
-              if (batch.length === 0) res(all);
-              else {
-                all.push(...batch);
-                next();
-              }
-            },
-            () => res(all),
-          );
-        next();
-      });
-    const files: { name: string; bytesOf: () => Promise<Uint8Array> }[] = [];
-    // Keep the relative path (prefix) so the directory tree reconstructs folders.
-    const walk = async (entry: Entry, prefix: string, depth: number): Promise<void> => {
-      if (entry.isFile) {
-        const file = await new Promise<File>((res, rej) => entry.file(res, rej)).catch(() => null);
-        if (file)
-          files.push({
-            name: prefix + file.name,
-            bytesOf: async () => new Uint8Array(await file.arrayBuffer()),
-          });
-      } else if (entry.isDirectory && depth < 6) {
-        for (const child of await readAll(entry))
-          await walk(child, `${prefix}${entry.name}/`, depth + 1);
-      }
-    };
     const entries = [...e.dataTransfer.items]
-      .map((i) => i.webkitGetAsEntry() as unknown as Entry | null)
-      .filter((x): x is Entry => !!x);
-    for (const en of entries) await walk(en, '', 0);
-    await ingest(files);
+      .map((i) => i.webkitGetAsEntry() as unknown as DropEntry | null)
+      .filter((x): x is DropEntry => !!x);
+    await ingest(await walkDroppedEntries(entries));
   };
 
   // Archive Project: KiCad zips the whole project folder byte-exact under a
