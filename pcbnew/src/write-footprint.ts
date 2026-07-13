@@ -3,7 +3,7 @@
  *
  * The faithful counterpart to KiCad's `PCB_IO_KICAD_SEXPR::format( const
  * FOOTPRINT* )` and the per-item `format()` overloads for PAD / PCB_SHAPE /
- * PCB_TEXT (pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.cpp), writing the
+ * PCB_TEXT (pcbnew/pcb_io/sexpr/pcb_io_sexpr.cpp), writing the
  * footprint in its own local frame (a library `.kicad_mod`).
  *
  * Lossless by patching, exactly like the schematic and symbol-library writers:

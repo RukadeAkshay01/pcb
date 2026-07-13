@@ -13,7 +13,7 @@
  */
 
 import type { Schematic, SchSymbol, SchField } from '../types.js';
-import { buildPropertyNode } from '../sch_io/kicad_sexpr/write-schematic.js';
+import { buildPropertyNode } from '../sch_io/sexpr/write-schematic.js';
 import { refId } from './hittest.js';
 import type { EditCommand } from './command.js';
 

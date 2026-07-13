@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse, serialize } from '@ziroeda/sexpr/src/index.js';
-import { readSchematic } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
-import { writeSchematic } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/write-schematic.js';
+import { readSchematic } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
+import { writeSchematic } from '@ziroeda/eeschema/src/sch_io/sexpr/write-schematic.js';
 import { makeBus, makeLabel } from '@ziroeda/eeschema/src/tools/build.js';
 import { makeTextBox, makeTable } from '@ziroeda/eeschema/src/tools/build-graphics.js';
 import { addItems } from '@ziroeda/eeschema/src/tools/mutate.js';

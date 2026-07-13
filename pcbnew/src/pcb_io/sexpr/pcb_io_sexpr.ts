@@ -1,6 +1,6 @@
 /**
  * PCB_IO_KICAD_SEXPR — the `.kicad_pcb` writer
- * (pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.cpp). Regenerates the file text
+ * (pcbnew/pcb_io/sexpr/pcb_io_sexpr.cpp). Regenerates the file text
  * from the live BOARD object model — KiCad's real approach (no source
  * preservation): every field the model holds is emitted from the object's
  * current state, so an edit shows up because the object changed.

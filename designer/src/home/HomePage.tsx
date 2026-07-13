@@ -180,7 +180,7 @@ const newProjectFiles = (name: string): PickedHomeFile[] => {
 const sanitizeProjectName = (s: string): string => s.replace(/[/\\:*?"<>|]/g, '').trim();
 
 const treeIconFor = (file: string): string =>
-  /\.kicad_pro$/i.test(file) ? 'project_kicad'
+  /\.kicad_pro$/i.test(file) ? 'project'
   : /\.kicad_sch$/i.test(file) ? 'icon_eeschema_16'
   : /\.kicad_pcb$/i.test(file) ? 'icon_pcbnew_16'
   : /\.kicad_sym$/i.test(file) ? 'library'
@@ -818,7 +818,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
                     className={`twisty expandable${rootOpen ? ' open' : ''}`}
                     onClick={(e) => { e.stopPropagation(); setRootOpen((o) => !o); }}
                   />
-                  <TreeIcon name="project_kicad" />
+                  <TreeIcon name="project" />
                   <span>{rootLabel}</span>
                 </div>
                 {/* project directory contents, flat and KiCad-sorted */}
@@ -897,7 +897,7 @@ export function HomePage({ onOpenSchematic, onOpenProject, onOpenPcb, onOpenSymb
                     onClick={() => void openStored(p.id)}
                     title={`Reopen ${p.name} — saved in this browser`}
                   >
-                    <TreeIcon name="project_kicad" />
+                    <TreeIcon name="project" />
                     <span className="ze-recent-name">{p.name}</span>
                     <span className="ze-recent-meta">
                       {p.fileCount} file{p.fileCount === 1 ? '' : 's'} · {fmtBytes(p.bytes)} · {fmtWhen(p.updatedAt)}

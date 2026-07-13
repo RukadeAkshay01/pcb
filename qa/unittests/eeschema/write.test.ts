@@ -6,7 +6,7 @@ import { readSchematic, writeSchematic } from '@ziroeda/eeschema';
 import { mmToIU } from '@ziroeda/common/src/eda_units.js';
 import { moveItems } from '@ziroeda/eeschema/src/tools/move.js';
 import { placeSymbol } from '@ziroeda/eeschema/src/tools/mutate.js';
-import { readSymbolLib } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
+import { readSymbolLib } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
 
 const fixture = readFileSync(
   fileURLToPath(new URL('../../data/nfc-antenna.kicad_sch', import.meta.url)),

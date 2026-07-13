@@ -1,6 +1,6 @@
 /**
  * PCB_IO_KICAD_SEXPR_PARSER — the `.kicad_pcb` reader
- * (pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr_parser.cpp). Builds the BOARD
+ * (pcbnew/pcb_io/sexpr/pcb_io_sexpr_parser.cpp). Builds the BOARD
  * object model from file text. KiCad hand-writes a DSN lexer; here the shared
  * S-expr parser (src/sexpr) is the lexer/AST and this class maps the AST to
  * objects (parseBOARD / parseFOOTPRINT / parsePAD / parsePCB_TRACK / …).

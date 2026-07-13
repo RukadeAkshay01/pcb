@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '@ziroeda/sexpr/src/index.js';
-import { readSchematic, readSymbolLib } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
+import { readSchematic, readSymbolLib } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
 import { danglingPinPositions } from '@ziroeda/eeschema/src/connectivity/dangling.js';
 import { addItems, makeWire, placeSymbol } from '@ziroeda/eeschema/src/tools/index.js';
 import { mmToIU } from '@ziroeda/common/src/eda_units.js';

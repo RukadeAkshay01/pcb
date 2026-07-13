@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '@ziroeda/sexpr/src/index.js';
-import { readSchematic } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
+import { readSchematic } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
 import { addItems, makeWire, makeBus, makeJunction } from '@ziroeda/eeschema/src/tools/index.js';
 import { mergeColinearWires, withCleanup } from '@ziroeda/eeschema/src/tools/cleanup.js';
 import { History } from '@ziroeda/eeschema/src/tools/command.js';

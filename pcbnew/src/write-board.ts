@@ -3,7 +3,7 @@
  *
  * The board counterpart to write-footprint.ts and KiCad's
  * `PCB_IO_KICAD_SEXPR::format( const BOARD* )`
- * (pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.cpp). Lossless by the same
+ * (pcbnew/pcb_io/sexpr/pcb_io_sexpr.cpp). Lossless by the same
  * patch-in-place strategy: the top-level `(kicad_pcb …)` node is rebuilt by
  * walking the *source* children in order, and for each child the model owns
  * (footprints, tracks/arcs, vias, zones, gr_* graphics, gr_text) the item's

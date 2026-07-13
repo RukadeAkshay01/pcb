@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatBoard } from '@ziroeda/pcbnew/src/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.js';
+import { formatBoard } from '@ziroeda/pcbnew/src/pcb_io/sexpr/pcb_io_sexpr.js';
 import { BOARD } from '@ziroeda/pcbnew/src/board.js';
 import { PCB_TRACK, PCB_VIA, VIATYPE } from '@ziroeda/pcbnew/src/pcb_track.js';
 import { PCB_SHAPE } from '@ziroeda/pcbnew/src/pcb_shape.js';

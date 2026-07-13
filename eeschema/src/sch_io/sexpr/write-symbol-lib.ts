@@ -2,7 +2,7 @@
  * Writer: typed LibSymbol model -> S-expression AST -> `.kicad_sym` text.
  *
  * The faithful counterpart to KiCad's `SCH_IO_KICAD_SEXPR_LIB_CACHE::Save` /
- * `SaveSymbol` (eeschema/sch_io/kicad_sexpr/sch_io_kicad_sexpr_lib_cache.cpp).
+ * `SaveSymbol` (eeschema/sch_io/sexpr/sch_io_kicad_sexpr_lib_cache.cpp).
  * Like the schematic writer it is lossless by patching: every item keeps the
  * `source` node it was read from, so untouched symbols round-trip byte-for-byte
  * while edited items are rebuilt in KiCad's canonical format.

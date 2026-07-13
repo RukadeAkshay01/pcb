@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseBoard } from '@ziroeda/pcbnew/src/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr_parser.js';
-import { formatBoard } from '@ziroeda/pcbnew/src/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.js';
+import { parseBoard } from '@ziroeda/pcbnew/src/pcb_io/sexpr/pcb_io_sexpr_parser.js';
+import { formatBoard } from '@ziroeda/pcbnew/src/pcb_io/sexpr/pcb_io_sexpr.js';
 import { PCB_VIA } from '@ziroeda/pcbnew/src/pcb_track.js';
 import { mmToIU } from '@ziroeda/common/src/eda_units.js';
 

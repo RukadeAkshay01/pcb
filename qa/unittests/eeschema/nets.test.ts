@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '@ziroeda/sexpr/src/index.js';
-import { readSchematic, readSymbolLib } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
+import { readSchematic, readSymbolLib } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
 import { computeNetlist } from '@ziroeda/eeschema/src/connectivity/nets.js';
 import { addItems, makeWire, makeJunction, makeLabel, placeSymbol } from '@ziroeda/eeschema/src/tools/index.js';
 import { refId } from '@ziroeda/eeschema/src/tools/hittest.js';

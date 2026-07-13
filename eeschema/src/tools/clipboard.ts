@@ -18,9 +18,9 @@
 
 import { parse, serialize } from '@ziroeda/sexpr/src/index.js';
 import { head, isList, list, atom, str, type SList } from '@ziroeda/sexpr/src/types.js';
-import { readSchematic } from '../sch_io/kicad_sexpr/read-schematic.js';
+import { readSchematic } from '../sch_io/sexpr/read-schematic.js';
 import type { Schematic, SchSymbol, SchLine, SchJunction, SchLabel, SchField, LibSymbol, Vec2 } from '../types.js';
-import { writeSchematic } from '../sch_io/kicad_sexpr/write-schematic.js';
+import { writeSchematic } from '../sch_io/sexpr/write-schematic.js';
 import { childNamed } from '@ziroeda/sexpr/src/query.js';
 import { refId } from './hittest.js';
 import { newUuid, makeLabel } from './build.js';

@@ -2,7 +2,7 @@
  * Typed board model for `.kicad_pcb` files.
  *
  * Mirrors the item set of KiCad's `PCB_IO_KICAD_SEXPR_PARSER`
- * (pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr_parser.cpp). Coordinates are in
+ * (pcbnew/pcb_io/sexpr/pcb_io_sexpr_parser.cpp). Coordinates are in
  * the same integer internal units as the schematic model (mmToIU), positions of
  * footprint children are stored board-absolute (the parent transform is applied
  * at read time exactly like the parser's legacy-file path: rotate by the

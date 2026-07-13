@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '@ziroeda/sexpr/src/index.js';
-import { readSchematic } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
+import { readSchematic } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
 import { makeWire, makeLabel } from '@ziroeda/eeschema/src/tools/build.js';
 import { addItems } from '@ziroeda/eeschema/src/tools/mutate.js';
 import { lassoSelect } from '@ziroeda/eeschema/src/tools/boxselect.js';

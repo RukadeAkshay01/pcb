@@ -2,7 +2,7 @@
  * Reader: S-expression AST -> typed Board model.
  *
  * The faithful counterpart to KiCad's `PCB_IO_KICAD_SEXPR_PARSER`
- * (pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr_parser.cpp). Semantics ported
+ * (pcbnew/pcb_io/sexpr/pcb_io_sexpr_parser.cpp). Semantics ported
  * for pre-affine-transform files (version < FIRST_FP_AFFINE_TRANSFORM =
  * 20260616, i.e. every KiCad 9 and earlier board):
  *  - footprint children store FP-relative positions; board coords are

@@ -6,7 +6,7 @@
  *
  * The transform methods (Move/Rotate/Flip/Mirror) mutate the item in place,
  * exactly like KiCad — the object model is the source of truth, and the writer
- * (pcb_io_kicad_sexpr) regenerates the file from it.
+ * (pcb_io_sexpr) regenerates the file from it.
  */
 
 import type { VECTOR2I } from '@ziroeda/kimath/src/math/vector2.js';

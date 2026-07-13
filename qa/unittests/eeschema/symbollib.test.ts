@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from '@ziroeda/sexpr/src/index.js';
-import { readSymbolLib } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-schematic.js';
+import { readSymbolLib } from '@ziroeda/eeschema/src/sch_io/sexpr/read-schematic.js';
 import { mmToIU, iuToMM } from '@ziroeda/common/src/eda_units.js';
 import { History } from '@ziroeda/eeschema/src/tools/command.js';
 import { placeSymbol } from '@ziroeda/eeschema/src/tools/mutate.js';
