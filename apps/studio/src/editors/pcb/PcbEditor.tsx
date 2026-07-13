@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   parse, readBoard, iuToMM, boardHitCandidates, boardItemsInBox, boardItemBBox, parseBoardItemId,
-  moveBoardItems, serializeBoard,
+  moveBoardItems, deleteBoardItems, serializeBoard,
   type Board, type BoardItemKind,
 } from '@ziroeda/core';
 import { MenuBar, type Menu } from '../../ui/MenuBar.js';
@@ -386,6 +386,16 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
     setSelection(new Set());
   }, [setBoardModel]);
 
+  // Delete the selected items (EDIT_TOOL::Remove). Reads the live selection ref
+  // so the keyboard shortcut and menu both act on the current selection.
+  const deleteSel = useCallback(() => {
+    const brd = boardRef.current;
+    const sel = selForDrawRef.current;
+    if (!brd || sel.size === 0) return;
+    commitBoard(deleteBoardItems(brd, sel));
+    setSelection(new Set());
+  }, [commitBoard]);
+
   const zoomToFit = useCallback(() => {
     const canvas = canvasRef.current;
     const scene = sceneRef.current;
@@ -625,6 +635,7 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
       const mod = e.ctrlKey || e.metaKey;
       if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+      if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); deleteSel(); return; }
       if (!mod && (e.key === 'f' || e.key === 'F')) zoomToFit();
       if (e.key === 'Escape') {
         // Escape first dismisses the disambiguation menu, then clears selection.
@@ -634,7 +645,7 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [zoomToFit, undo, redo]);
+  }, [zoomToFit, undo, redo, deleteSel]);
 
   const [viewer3dReady, setViewer3dReady] = useState(false);
   // Mount the three.js 3D viewer while the overlay is open. Lazy-imported so
@@ -762,6 +773,8 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
       items: [
         { label: 'Undo', action: undo, shortcut: 'Ctrl+Z' },
         { label: 'Redo', action: redo, shortcut: 'Ctrl+Y' },
+        { sep: true },
+        { label: 'Delete', action: deleteSel, shortcut: 'Del' },
         { sep: true },
         { label: 'Find', disabled: dis, shortcut: 'Ctrl+F' },
         { sep: true },
@@ -1048,7 +1061,7 @@ export function PcbEditor({ fileName, text, onExit, onShowSchematic, projectName
           orientation="vertical"
           side="right"
           activeTool={activeTool}
-          onActivate={(id) => setActiveTool(id)}
+          onActivate={(id) => { if (id === 'delete') deleteSel(); else setActiveTool(id); }}
         />
       </div>
 

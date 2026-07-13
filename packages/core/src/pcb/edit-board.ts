@@ -459,11 +459,7 @@ const moveFootprint = (fp: PcbFootprint, d: Vec2): PcbFootprint => ({
  */
 export function moveBoardItems(board: Board, ids: ReadonlySet<string>, delta: Vec2): Board {
   if ((delta.x === 0 && delta.y === 0) || ids.size === 0) return board;
-  const idx: Record<BoardItemKind, Set<number>> = {
-    track: new Set(), arc: new Set(), via: new Set(), footprint: new Set(),
-    zone: new Set(), shape: new Set(), text: new Set(),
-  };
-  for (const id of ids) { const r = parseBoardItemId(id); if (r) idx[r.kind].add(r.index); }
+  const idx = indicesByKind(ids);
   return {
     ...board,
     tracks: board.tracks.map((t, i) => (idx.track.has(i) ? moveTrack(t, delta) : t)),
@@ -472,5 +468,37 @@ export function moveBoardItems(board: Board, ids: ReadonlySet<string>, delta: Ve
     shapes: board.shapes.map((s, i) => (idx.shape.has(i) ? moveShape(s, delta) : s)),
     texts: board.texts.map((t, i) => (idx.text.has(i) ? moveText(t, delta) : t)),
     footprints: board.footprints.map((f, i) => (idx.footprint.has(i) ? moveFootprint(f, delta) : f)),
+  };
+}
+
+// ----- delete (EDIT_TOOL::Remove) ---------------------------------------------
+
+/** Split a selection id set into per-kind index sets. */
+function indicesByKind(ids: ReadonlySet<string>): Record<BoardItemKind, Set<number>> {
+  const idx: Record<BoardItemKind, Set<number>> = {
+    track: new Set(), arc: new Set(), via: new Set(), footprint: new Set(),
+    zone: new Set(), shape: new Set(), text: new Set(),
+  };
+  for (const id of ids) { const r = parseBoardItemId(id); if (r) idx[r.kind].add(r.index); }
+  return idx;
+}
+
+/**
+ * Remove the selected items from the board (Delete key / EDIT_TOOL::Remove).
+ * The writer drops the corresponding source children positionally, so a deleted
+ * item leaves no trace in the serialized `.kicad_pcb`.
+ */
+export function deleteBoardItems(board: Board, ids: ReadonlySet<string>): Board {
+  if (ids.size === 0) return board;
+  const idx = indicesByKind(ids);
+  return {
+    ...board,
+    tracks: board.tracks.filter((_, i) => !idx.track.has(i)),
+    arcs: board.arcs.filter((_, i) => !idx.arc.has(i)),
+    vias: board.vias.filter((_, i) => !idx.via.has(i)),
+    zones: board.zones.filter((_, i) => !idx.zone.has(i)),
+    shapes: board.shapes.filter((_, i) => !idx.shape.has(i)),
+    texts: board.texts.filter((_, i) => !idx.text.has(i)),
+    footprints: board.footprints.filter((_, i) => !idx.footprint.has(i)),
   };
 }

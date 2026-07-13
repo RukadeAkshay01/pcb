@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   boardItemId, parseBoardItemId, boardItemBBox,
-  hitTestBoard, boardHitCandidates, boardItemsInBox, moveBoardItems,
+  hitTestBoard, boardHitCandidates, boardItemsInBox, moveBoardItems, deleteBoardItems,
 } from '../src/pcb/edit-board.js';
 import { parse } from '../src/sexpr/index.js';
 import { readBoard } from '../src/pcb/read-board.js';
@@ -222,5 +222,40 @@ describe('moveBoardItems', () => {
     // The track kept its net/width (only coords were patched).
     expect(reread.tracks[0]!.net).toBe(1);
     expect(reread.tracks[0]!.width).toBe(mmToIU(0.25));
+  });
+});
+
+describe('deleteBoardItems', () => {
+  it('removes only the selected items', () => {
+    const b = board({
+      tracks: [track({ x: 0, y: 0 }, { x: 1, y: 0 }), track({ x: 0, y: 5 }, { x: 1, y: 5 })],
+      vias: [via({ x: 9, y: 9 })],
+    });
+    const out = deleteBoardItems(b, new Set(['track:0', 'via:0']));
+    expect(out.tracks).toHaveLength(1);
+    expect(out.tracks[0]!.start).toEqual({ x: 0, y: 5 }); // the surviving track
+    expect(out.vias).toHaveLength(0);
+  });
+
+  it('no-ops for an empty selection', () => {
+    const b = board({ tracks: [track({ x: 0, y: 0 }, { x: 1, y: 0 })] });
+    expect(deleteBoardItems(b, new Set())).toBe(b);
+  });
+
+  it('drops the right source child when a MIDDLE item is deleted (writer)', () => {
+    // Three named tracks; delete the middle one and confirm the writer emits the
+    // other two (positional deletion, not "drop the last").
+    const TEXT = `(kicad_pcb (version 20241229) (generator "pcbnew")
+	(layers (0 "F.Cu" signal))
+	(net 0 "") (net 1 "A") (net 2 "B") (net 3 "C")
+	(segment (start 0 0) (end 1 0) (width 0.2) (layer "F.Cu") (net 1))
+	(segment (start 0 1) (end 1 1) (width 0.2) (layer "F.Cu") (net 2))
+	(segment (start 0 2) (end 1 2) (width 0.2) (layer "F.Cu") (net 3))
+)
+`;
+    const b = readBoard(parse(TEXT));
+    const out = deleteBoardItems(b, new Set(['track:1'])); // the net-2 track
+    const reread = readBoard(parse(serializeBoard(out)));
+    expect(reread.tracks.map((t) => t.net)).toEqual([1, 3]);
   });
 });

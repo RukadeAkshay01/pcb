@@ -20,24 +20,21 @@
 import { isList, head, type SList, type SNode } from '../sexpr/index.js';
 import { serialize } from '../sexpr/serializer.js';
 import { writeFootprintNode } from './write-footprint.js';
-import type { Board, PcbFootprint } from './types.js';
+import type { Board } from './types.js';
 
 /** A source child the reader parsed by these top-level heads. */
 const GRAPHIC_HEADS = new Set(['gr_line', 'gr_arc', 'gr_circle', 'gr_rect', 'gr_poly', 'gr_curve']);
-
-/** Emit a modelled item: its (possibly patched) source, or — for a source-less
- *  item built from scratch — a caller-supplied fallback. Board editing patches
- *  the source node in place, so read items always carry a non-empty source. */
-const srcOr = (source: SList | undefined, fallback: SNode): SNode =>
-  source && source.items.length > 0 ? source : fallback;
-
-const footprintNode = (fp: PcbFootprint | undefined, original: SNode): SNode =>
-  fp ? writeFootprintNode(fp) : original;
 
 /**
  * Rebuild the `(kicad_pcb …)` node from the typed model, emitting each modelled
  * child from the model arrays (in source order) and passing every other child
  * through unchanged.
+ *
+ * Deletions are handled positionally, exactly like writeFootprintNode: each
+ * modelled source child pulls the next item of its kind from the model array and
+ * emits that item's (patched) source; once the array is exhausted the remaining
+ * source children of that kind are dropped. Because every surviving item carries
+ * its own source, order and content stay correct while the deleted ones vanish.
  */
 export function writeBoardNode(board: Board): SList {
   const src = board.source;
@@ -48,13 +45,13 @@ export function writeBoardNode(board: Board): SList {
   for (const it of src.items) {
     if (!isList(it)) { out.push(it); continue; }
     const h = head(it) ?? '';
-    if (h === 'footprint' || h === 'module') out.push(footprintNode(board.footprints[fi++], it));
-    else if (h === 'segment') out.push(srcOr(board.tracks[ti++]?.source, it));
-    else if (h === 'arc') out.push(srcOr(board.arcs[ai++]?.source, it));
-    else if (h === 'via') out.push(srcOr(board.vias[vi++]?.source, it));
-    else if (h === 'zone') out.push(srcOr(board.zones[zi++]?.source, it));
-    else if (GRAPHIC_HEADS.has(h)) out.push(srcOr(board.shapes[si++]?.source, it));
-    else if (h === 'gr_text') out.push(srcOr(board.texts[xi++]?.source, it));
+    if (h === 'footprint' || h === 'module') { if (fi < board.footprints.length) out.push(writeFootprintNode(board.footprints[fi]!)); fi++; }
+    else if (h === 'segment') { if (ti < board.tracks.length) out.push(board.tracks[ti]!.source); ti++; }
+    else if (h === 'arc') { if (ai < board.arcs.length) out.push(board.arcs[ai]!.source); ai++; }
+    else if (h === 'via') { if (vi < board.vias.length) out.push(board.vias[vi]!.source); vi++; }
+    else if (h === 'zone') { if (zi < board.zones.length) out.push(board.zones[zi]!.source); zi++; }
+    else if (GRAPHIC_HEADS.has(h)) { if (si < board.shapes.length) out.push(board.shapes[si]!.source); si++; }
+    else if (h === 'gr_text') { if (xi < board.texts.length) out.push(board.texts[xi]!.source); xi++; }
     else out.push(it);
   }
   return { kind: 'list', items: out };
