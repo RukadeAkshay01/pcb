@@ -7,7 +7,7 @@ import { readSymbolLib } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/read-sch
 import { serializeSymbolLib } from '@ziroeda/eeschema/src/sch_io/kicad_sexpr/write-symbol-lib.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const LIB = join(here, '../../../kicad/public/symbols/Device.kicad_sym');
+const LIB = join(here, '../../../designer/public/symbols/Device.kicad_sym');
 
 describe('symbol library writer', () => {
   it('round-trips an untouched library semantically', () => {

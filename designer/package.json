@@ -1,7 +1,7 @@
 {
-  "name": "@ziroeda/kicad",
+  "name": "@ziroeda/designer",
   "version": "0.0.0",
-  "description": "ZiroEDA — browser-native EDA suite (KiCad-compatible). App shell + editor frames (KiCad: kicad/).",
+  "description": "Ziro Designer — the ZiroEDA design suite app shell: launcher, editor frames, cloud sync.",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {

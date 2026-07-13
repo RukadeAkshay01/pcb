@@ -2,6 +2,6 @@ packages:
   - "common"
   - "eeschema"
   - "pcbnew"
-  - "kicad"
+  - "designer"
   - "libs/*"
   - "qa"
