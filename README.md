@@ -1,40 +1,36 @@
-# ZiroEDA
+# Ziro Designer
 
-**KiCad in the browser — same UI, same shortcuts, same files. Zero learning
-curve, zero installs.**
+**Professional electronics design in a browser tab — zero learning curve, zero
+installs.**
 
-ZiroEDA is a browser-native, open-source electronics design suite: a faithful,
-web-native reimplementation of the [KiCad](https://www.kicad.org/) workflow that
-looks and behaves exactly like KiCad and reads/writes KiCad's native file
-formats directly. No migration, no retraining — the world's largest open-source
-EDA community can just open a tab.
+Ziro Designer is the flagship design suite from **ZiroEDA**: a browser-native,
+open-source electronics design tool. It speaks the industry's open file formats
+natively — projects made in KiCad open directly with no import step, no
+migration, no retraining — while everything about the product (cloud projects,
+sharing, and the AI-assisted design tools on our roadmap) is built web-first.
 
-The core is free software (GPL, like KiCad itself). The plan is to charge only
-for what a hosted service uniquely adds on top — cloud compute (simulation,
+The core is free software (GPL-3.0-or-later). The plan is to charge only for
+what a hosted service uniquely adds on top — cloud compute (simulation,
 autorouting, batch DRC), real-time team collaboration, and AI assistance —
 never for the editor itself. See **[PHILOSOPHY.md](./PHILOSOPHY.md)** for our
-compatibility promise and how we relate to the KiCad project and community.
+format-compatibility promise and how we relate to the upstream ecosystem.
 
-> ZiroEDA is an independent project. It is **not** affiliated with or endorsed by
-> the KiCad project, and "KiCad" is a trademark of its respective owners.
+> Ziro Designer is an independent project by ZiroEDA. It is **not** affiliated
+> with or endorsed by the KiCad project; "KiCad" is a trademark of its
+> respective owners.
 
 ## Goals
 
-- **Familiar.** Look and behave like KiCad so existing users feel at home —
-  same conventions, same hotkeys, same visual style.
-- **Interoperable.** Use KiCad's native formats (`.kicad_sch`, `.kicad_sym`, …)
-  as the source of truth, so existing projects open directly with no import step.
+- **Familiar.** Behave like the tools electronics engineers already know —
+  same conventions, same hotkeys, same visual language — so switching costs
+  nothing.
+- **Interoperable.** Open formats are the source of truth. Your designs are
+  plain files you own, readable by other tools, forever.
 - **Web-native.** TypeScript + Canvas/WebGL in the browser. Heavy batch compute
-  (simulation, 3D kernel ops, autorouting) is offloaded to a server when needed.
-- **Expandable.** A shared core underpins each tool (schematic editor first, then
-  the others), so capabilities compound rather than being rebuilt per tool.
-
-## Why a reimplementation (not a port)
-
-KiCad is C++ built on wxWidgets, a custom OpenGL/Cairo rendering layer, and
-OpenCASCADE — none of which port cleanly to the browser. ZiroEDA is a
-ground-up reimplementation in web-native technology that stays format-compatible
-with KiCad rather than attempting to compile its source to WebAssembly.
+  (simulation, 3D kernel ops, autorouting) offloads to a server when needed.
+- **Expandable.** A shared engine underpins every editor (schematic, symbol,
+  board, footprint today), so capabilities compound rather than being rebuilt
+  per tool — and the coming AI copilot plugs into all of them at once.
 
 ## License
 
@@ -45,64 +41,59 @@ GPL-3.0-or-later. See [LICENSE](./LICENSE).
 | Concern                | Choice                                             |
 | ---------------------- | -------------------------------------------------- |
 | Core language          | TypeScript (Rust/WASM reserved for measured hot paths) |
-| UI                     | React + Tailwind CSS                               |
-| Docking panels         | Dockview                                           |
-| 2D rendering           | Canvas2D → WebGL (PixiJS/regl) behind an interface |
-| Geometry / boolean ops | custom geometry + clipper2-wasm                    |
-| Spatial index          | RBush (R-tree)                                      |
-| State / undo / actions | Zustand + a custom command bus                     |
-| File access            | File System Access API + OPFS                      |
+| UI                     | React                                              |
+| 2D rendering           | Canvas2D → WebGL behind an interface               |
+| 3D viewer              | three.js                                           |
+| State / undo / actions | command bus with lossless document sources         |
+| Auth / cloud sync      | Supabase                                           |
 | Build / monorepo       | Vite + pnpm workspaces                             |
-| Tests                  | Vitest (unit) + Playwright (e2e / visual diff)     |
+| Tests                  | Vitest                                             |
 
 ## Repository layout
 
-The tree mirrors KiCad's own source layout, directory for directory — see
-**[STRUCTURE.md](./STRUCTURE.md)** for the full mapping.
+See **[STRUCTURE.md](./STRUCTURE.md)** for the full map and the conventions
+behind it.
 
 ```
-ziroeda/
-  kicad/         # app shell (Vite + React): launcher, editor frames, cloud  (KiCad: kicad/)
-  eeschema/      # schematic engine: model, sch_io, connectivity/ERC, tools  (KiCad: eeschema/)
-  pcbnew/        # board engine: BOARD/FOOTPRINT model, pcb_io, editing      (KiCad: pcbnew/)
-  common/        # shared EDA classes: EDA_SHAPE, EDA_TEXT, units, font      (KiCad: common/)
+ziro-designer/
+  designer/      # the app: launcher, editor frames, cloud sync, served libraries
+  eeschema/      # schematic engine: document model, file io, connectivity/ERC, tools
+  pcbnew/        # board engine: object model, file io, board editing
+  common/        # shared EDA classes: shapes, text, units, transforms, stroke font
   libs/
-    kimath/      # math: vector2, eda_angle, trigo                           (KiCad: libs/kimath/)
-    core/        # small shared utilities                                    (KiCad: libs/core/)
-    sexpr/       # lossless S-expression parser/serializer                   (KiCad: libs/sexpr/)
-  qa/            # unit tests (qa/unittests/<module>) + fixtures (qa/data)   (KiCad: qa/)
+    kimath/      # math: vectors, angles, trigonometry
+    core/        # small shared utilities
+    sexpr/       # lossless S-expression parser/serializer
+  qa/            # unit tests (qa/unittests/<module>) + fixtures (qa/data)
 ```
 
-### `@ziroeda/kicad` — the app
+### `@ziroeda/designer` — the app
 
-A React + Canvas2D suite that renders real KiCad files faithfully: the
-schematic editor, symbol editor, PCB editor (with 3D viewer), and footprint
-editor, each wrapped in its KiCad window chrome — menu bar, toolbars, panels,
-and a live status bar — with toolbar contents transcribed from KiCad's own
-`toolbars_*.cpp`. Run it with:
+A React + Canvas2D suite with four editors — schematic, symbol, board, and
+footprint (plus a 3D board viewer) — each wrapped in familiar window chrome:
+menu bar, toolbars, panels, and a live status bar. Run it with:
 
 ```bash
-pnpm -C kicad dev      # http://localhost:5173
-pnpm -C kicad build    # typecheck + production build
+pnpm -C designer dev      # http://localhost:5173
+pnpm -C designer build    # typecheck + production build
 ```
 
 ### The engine packages
 
-Two layers, both grounded in KiCad's own implementation:
+Two layers, both built for round-trip fidelity:
 
-- **Lossless S-expression layer** — the parser/serializer for KiCad-format files.
-  "Lossless" is a hard requirement: it preserves every node (including fields
-  ZiroEDA does not yet model) and the exact source text of numeric atoms, so
-  saving a file never silently corrupts data the user cares about. Correctness is
-  enforced by a round-trip test against a real KiCad schematic
+- **Lossless S-expression layer** — the parser/serializer for the open design
+  formats. "Lossless" is a hard requirement: it preserves every node (including
+  fields Ziro Designer does not yet model) and the exact source text of numeric
+  atoms, so saving a file never silently corrupts data the user cares about.
+  Correctness is enforced by round-trip tests against real design files
   (`parse ∘ serialize ∘ parse` is identity over the AST).
 
-- **Typed schematic model** — a typed view over that AST (symbols, pins, wires,
-  labels, junctions, library symbols), mirroring KiCad's `SCH_*` / `LIB_SYMBOL`
-  classes and the fields its `kicad_sexpr` parser reads. Coordinates are integer
-  internal units (100 nm), exactly as KiCad stores them — not float millimetres —
-  so geometry and equality stay exact. Every modelled item keeps its source AST
-  node, so unmodified items still round-trip byte-for-byte.
+- **Typed document models** — typed views over that AST (symbols, pins, wires,
+  labels, boards, footprints, pads, zones). Coordinates are integer internal
+  units (100 nm), not float millimetres, so geometry and equality stay exact.
+  Every modelled item keeps its source AST node, so unmodified items round-trip
+  byte-for-byte.
 
 ```bash
 pnpm install
@@ -110,16 +101,15 @@ pnpm -C qa test      # run all unit tests (parser round-trips, model, editing, E
 pnpm -r typecheck    # typecheck every package
 ```
 
-## Roadmap (schematic capture first)
+## Roadmap
 
-1. **Lossless file I/O** — S-expression parser/serializer. ✅
-2. **Typed document model** — symbols, pins, wires, labels, junctions. ✅
-3. **Read-only viewer** — render a real `.kicad_sch` faithfully on a canvas. ✅
-4. **Selection + move + command bus** — click/box hit-testing, undo/redo. ✅
-5. **Draw wire + delete** — wire tool with junction auto-creation; add/delete commands. ✅
-6. **Place symbol** — placement from a bundled subset of KiCad's symbol libraries. ✅
-7. **Save** — write the edited document back to `.kicad_sch`, preserving unmodified nodes. ✅
-
-Connectivity (the net-building "connection graph"), ERC, and netlist export are
-the natural next steps, then the other tools (pcbnew, gerbview, …).
-
+1. **Schematic capture** — lossless file io, typed model, faithful rendering,
+   editing with undo/redo, symbol placement, save. ✅
+2. **Connectivity + ERC** — net building, dangling detection, rule checks. ✅
+3. **Board + footprint editing** — object model, file io, move/rotate/delete/
+   duplicate, 3D viewer. ✅ (in progress: routing tools)
+4. **Cloud projects** — auth, project storage, templates. ✅ (hardening)
+5. **Quality pass** — CI, lint, bug inventory, launcher/editor cleanup. ⟵ *now*
+6. **Collaboration** — sharing, review, multiplayer.
+7. **AI copilot** — assisted placement/routing/review, growing into agentic
+   design tools.
