@@ -614,6 +614,54 @@ body {
   background: var(--chrome-border);
   margin: 4px 0;
 }
+
+/* Modeless Find dialog (DIALOG_SCH_FIND): floats over the canvas, top-right. */
+.ze-find-dialog {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 320px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  z-index: 60;
+}
+.ze-find-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ze-find-body .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ze-find-body .row input {
+  flex: 1;
+}
+.ze-find-body .opts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.ze-find-body .opts label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ze-find-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.ze-find-buttons .status {
+  flex: 1;
+  color: #8a8c90;
+  font-size: 12px;
+}
 .ze-mitem .mcheck {
   font-size: 12px;
   line-height: 1;

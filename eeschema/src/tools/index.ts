@@ -13,3 +13,4 @@ export * from './mutate.js';
 export * from './properties.js';
 export * from './boxselect.js';
 export * from './clipboard.js';
+export * from './sch_find_replace_tool.js';

@@ -126,7 +126,7 @@ export function buildMenus(h: MenuHandlers, checks: MenuChecks = {}): Menu[] {
         stub('Select All', 'Ctrl+A'),
         stub('Unselect All', 'Ctrl+Shift+A'),
         SEP,
-        stub('Find', 'Ctrl+F'),
+        act('Find', 'find', 'find', 'Ctrl+F'),
         stub('Find and Replace', 'Ctrl+Alt+F'),
         SEP,
         stub('Interactive Delete Tool'),

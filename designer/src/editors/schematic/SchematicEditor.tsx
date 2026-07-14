@@ -14,6 +14,9 @@ import {
   copySelectionText,
   parsePastedText,
   boxSelect,
+  findMatches,
+  defaultSearchData,
+  type SchSearchData,
   runErc,
   buildSheetTree,
   sheetFile,
@@ -60,6 +63,7 @@ import {
   parentPath,
   type SheetRef,
 } from './sch_navigate_tool.js';
+import { DialogSchematicFind } from './dialogs/dialog_schematic_find.js';
 import { LoadingOverlay, nextPaint } from '../../ui/LoadingOverlay.js';
 import { PreferencesDialog } from '../../prefs/PreferencesDialog.js';
 import { settings, gridSizeToIU } from '../../prefs/settings.js';
@@ -368,6 +372,18 @@ export function SchematicEditor({
     navTool.current.cleanHistory(new Set(flatSheets.map((s) => s.path)));
   }, [flatSheets]);
 
+  // Find (SCH_FIND_REPLACE_TOOL): modeless dialog state, the search settings,
+  // and a cursor over the matches across sheet instances in hierarchy order.
+  const [findOpen, setFindOpen] = useState(false);
+  const [searchData, setSearchData] = useState<SchSearchData>(defaultSearchData);
+  const [findStatus, setFindStatus] = useState('');
+  const findCursor = useRef(-1);
+  useEffect(() => {
+    // Changed search settings restart the scan (upstream m_foundItemHighlight reset).
+    findCursor.current = -1;
+    setFindStatus('');
+  }, [searchData]);
+
   // Load a schematic from raw .kicad_sch text: parse (lossless), fresh history,
   // clear transient state, and fit the view. Embedded lib_symbols render as-is.
   const resetTransient = useCallback(() => {
@@ -529,6 +545,41 @@ export function SchematicEditor({
       requestAnimationFrame(() => controller.current?.zoomToFit());
     },
     [doc, currentFile, resetTransient],
+  );
+
+  // FindNext/FindPrevious (SCH_FIND_REPLACE_TOOL): collect matches over the
+  // sheet instances (hierarchy order, or just the current instance), advance
+  // the cursor with wrap-around, then jump: switch sheet, select, centre.
+  const doFind = useCallback(
+    (dir: 1 | -1) => {
+      const docs = new Map(project.current.docs);
+      if (doc) docs.set(currentFile, doc);
+      const sheets = searchData.searchCurrentSheetOnly
+        ? flatSheets.filter((s) => s.path === currentPath)
+        : flatSheets;
+      const all = sheets.flatMap((s) => {
+        const d = docs.get(s.file);
+        return d ? findMatches(d, libById, searchData).map((m) => ({ ...m, sheet: s })) : [];
+      });
+      if (all.length === 0) {
+        findCursor.current = -1;
+        setFindStatus(searchData.findString ? 'Not found' : '');
+        return;
+      }
+      findCursor.current =
+        findCursor.current === -1
+          ? dir === 1
+            ? 0
+            : all.length - 1
+          : (findCursor.current + dir + all.length) % all.length;
+      const m = all[findCursor.current]!;
+      if (m.sheet.path !== currentPath) switchSheet(m.sheet.path, m.sheet.file);
+      setSelection(new Set([m.id]));
+      // After a sheet switch the canvas fits first (rAF); centre on the frame after.
+      requestAnimationFrame(() => requestAnimationFrame(() => controller.current?.centerOn(m.pos)));
+      setFindStatus(`${findCursor.current + 1} of ${all.length}`);
+    },
+    [doc, currentFile, currentPath, flatSheets, libById, searchData, switchSheet],
   );
 
   // KiCad's Properties action: symbols have a full properties dialog; a text box
@@ -878,6 +929,7 @@ export function SchematicEditor({
       else if (id === 'symbolEditor') onShowSymbolEditor?.();
       else if (id === 'openPreferences') setPrefsOpen(true);
       else if (id === 'close') onExitToHome();
+      else if (id === 'find') setFindOpen(true);
       // Hierarchy navigation (SCH_NAVIGATE_TOOL). Back/Forward move the history
       // cursor without pushing; Up and Previous/Next go through changeSheet.
       else if (id === 'navBack' || id === 'navFwd') {
@@ -1002,6 +1054,14 @@ export function SchematicEditor({
         // SCH_ACTIONS::placeGlobalLabel default hotkey (Ctrl+L).
         e.preventDefault();
         onToolSelect('placeGlobalLabel');
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.altKey) {
+        // ACTIONS::find (Ctrl+F).
+        e.preventDefault();
+        setFindOpen(true);
+      } else if (e.key === 'F3' && (findOpen || searchData.findString)) {
+        // ACTIONS::findNext / findPrevious (F3 / Shift+F3).
+        e.preventDefault();
+        doFind(e.shiftKey ? -1 : 1);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !isTyping()) {
         // ACTIONS::selectAll / unselectAll (Ctrl+A / Ctrl+Shift+A). Select-all
         // is a greedy box select over the whole plane.
@@ -1164,6 +1224,9 @@ export function SchematicEditor({
     propsTarget,
     pastePending,
     duplicateSelection,
+    findOpen,
+    searchData,
+    doFind,
   ]);
 
   const units = toggles.has('unitsInches') ? 'in' : toggles.has('unitsMils') ? 'mils' : 'mm';
@@ -1362,6 +1425,16 @@ export function SchematicEditor({
               onRun={runErcNow}
               onLocate={locateViolation}
               onClose={() => setErcResult(null)}
+            />
+          )}
+          {findOpen && (
+            <DialogSchematicFind
+              data={searchData}
+              onChange={setSearchData}
+              onFindNext={() => doFind(1)}
+              onFindPrevious={() => doFind(-1)}
+              onClose={() => setFindOpen(false)}
+              status={findStatus}
             />
           )}
         </div>
