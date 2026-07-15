@@ -227,6 +227,12 @@ export function SchematicEditor({
     texts: string[];
   } | null>(null);
   const [pendingImage, setPendingImage] = useState<{ data: string } | null>(null);
+  // Keyboard-initiated grabbed move (SCH_MOVE_TOOL): M leaves connected wires
+  // behind, G drags them along. A fresh nonce restarts the grab.
+  const [grabRequest, setGrabRequest] = useState<{
+    kind: 'move' | 'drag';
+    nonce: number;
+  } | null>(null);
   // Editing an existing label's text/shape (DIALOG_LABEL_PROPERTIES).
   const [labelEdit, setLabelEdit] = useState<{
     index: number;
@@ -1269,6 +1275,14 @@ export function SchematicEditor({
           onTopAction(txKey);
           return;
         }
+        // M = Move (leaves connected wires behind), G = Drag (keeps them
+        // attached) — SCH_ACTIONS::move / drag. Grabs the current selection.
+        if ((e.key.toLowerCase() === 'm' || e.key.toLowerCase() === 'g') && selection.size > 0) {
+          e.preventDefault();
+          const kind = e.key.toLowerCase() === 'm' ? 'move' : 'drag';
+          setGrabRequest((prev) => ({ kind, nonce: (prev?.nonce ?? 0) + 1 }));
+          return;
+        }
         // ` = Highlight Net tool, ~ = clear highlighting
         // (SCH_ACTIONS::highlightNet / clearHighlight).
         if (e.key === '`') {
@@ -1522,6 +1536,7 @@ export function SchematicEditor({
             onSheetPinClick={onSheetPinClick}
             pendingImage={pendingImage}
             onImagePlaced={onImagePlaced}
+            grabRequest={grabRequest}
             onSelect={onSelect}
             onHighlight={onHighlight}
             onRequestTool={onToolSelect}

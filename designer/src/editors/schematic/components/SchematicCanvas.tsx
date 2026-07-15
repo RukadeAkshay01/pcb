@@ -12,6 +12,7 @@ import {
 import {
   hitTest,
   planMove,
+  moveItems,
   moveWithConnections,
   orthoMove,
   addItems,
@@ -318,6 +319,10 @@ interface Props {
   pendingImage?: { data: string } | null;
   /** The pending image was dropped at `at`. */
   onImagePlaced?: (at: Vec2) => void;
+  /** Keyboard-initiated grabbed move (SCH_MOVE_TOOL): 'move' leaves connected
+   *  wires behind, 'drag' keeps them attached. A fresh nonce starts a move of
+   *  the current selection that follows the cursor until clicked to drop. */
+  grabRequest?: { kind: 'move' | 'drag'; nonce: number } | null;
 }
 
 type Mode = 'idle' | 'pan' | 'dragzoom' | 'move' | 'box' | 'lasso';
@@ -359,6 +364,7 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     onSheetPinClick,
     pendingImage,
     onImagePlaced,
+    grabRequest,
   },
   ref,
 ): JSX.Element {
@@ -408,6 +414,13 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
   const moveStartRef = useRef<Vec2 | null>(null);
   const moveDeltaRef = useRef<Vec2 | null>(null);
   const moveSpecRef = useRef<MoveSpec | null>(null);
+  // 'move' leaves connected wires behind (moveItems), 'drag' rubber-bands them
+  // (moveWithConnections/orthoMove) — SCH_MOVE_TOOL's two modes.
+  const moveKindRef = useRef<'move' | 'drag'>('drag');
+  // A keyboard-initiated grabbed move follows the cursor with no button held and
+  // commits on the next left click (vs a button-drag, committed on pointer-up).
+  const grabbedRef = useRef(false);
+  const effSelRef = useRef<ReadonlySet<string>>(new Set());
   // Connectable snapping during a move: the moved items' own connection points and the
   // anchors of everything else, so a dragged pin/wire-end snaps onto a matching anchor.
   const movePointsRef = useRef<Vec2[]>([]);
@@ -474,13 +487,57 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
     [anchors, lineMode],
   );
 
-  // In H/V line mode, moves keep connected wires orthogonal (adding 90° bends);
-  // in free/45 mode the connected wire simply stretches.
+  // 'move' (M) translates only the selected items, leaving connected wires
+  // behind. 'drag' (G) keeps them attached: in H/V line mode it adds 90° bends
+  // (orthoMove); in free/45 mode the connected wire simply stretches.
   const buildMove = useCallback(
-    (spec: MoveSpec, delta: Vec2): EditCommand =>
-      lineMode === '90' ? orthoMove(schematic, spec, delta) : moveWithConnections(spec, delta),
+    (spec: MoveSpec, delta: Vec2): EditCommand => {
+      if (moveKindRef.current === 'move') return moveItems(effSelRef.current, delta);
+      return lineMode === '90'
+        ? orthoMove(schematic, spec, delta)
+        : moveWithConnections(spec, delta);
+    },
     [schematic, lineMode],
   );
+
+  // Keyboard-initiated grabbed move (SCH_MOVE_TOOL Move/Drag): the selection
+  // follows the cursor from the current position until a left click drops it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nonce-driven, like placeRequest
+  useEffect(() => {
+    if (!grabRequest || selection.size === 0) return;
+    const anchors = selectionAnchors(schematic, libById, selection);
+    const origin = cursorRef.current ? snap(cursorRef.current) : (anchors[0] ?? null);
+    if (!origin) return;
+    moveKindRef.current = grabRequest.kind;
+    effSelRef.current = selection;
+    const spec = planMove(schematic, libById, selection);
+    moveSpecRef.current = spec;
+    movePointsRef.current = anchors;
+    const moving = new Set([...selection, ...spec.wireStart, ...spec.wireEnd]);
+    moveAnchorsRef.current = collectAnchors(schematic, libById, moving);
+    moveStartRef.current = origin;
+    moveDeltaRef.current = { x: 0, y: 0 };
+    modeRef.current = 'move';
+    grabbedRef.current = true;
+    draw();
+
+    // Escape cancels the grabbed move (nothing was committed, so just drop the
+    // ghost). Capture phase + stopPropagation so the editor's Escape doesn't
+    // also clear the selection.
+    const onEsc = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape' && grabbedRef.current) {
+        ev.stopPropagation();
+        grabbedRef.current = false;
+        modeRef.current = 'idle';
+        moveSpecRef.current = null;
+        moveDeltaRef.current = null;
+        moveStartRef.current = null;
+        draw();
+      }
+    };
+    window.addEventListener('keydown', onEsc, true);
+    return () => window.removeEventListener('keydown', onEsc, true);
+  }, [grabRequest?.nonce]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -896,6 +953,21 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
       if (!vp) return;
       const world = toWorld(e.clientX, e.clientY);
 
+      // A keyboard grabbed move (M/G) commits on the next left click.
+      if (grabbedRef.current) {
+        if (e.button !== 0) return;
+        const d = moveDeltaRef.current;
+        const spec = moveSpecRef.current;
+        if (d && spec && (d.x !== 0 || d.y !== 0)) onCommand(buildMove(spec, d));
+        grabbedRef.current = false;
+        modeRef.current = 'idle';
+        moveSpecRef.current = null;
+        moveDeltaRef.current = null;
+        moveStartRef.current = null;
+        draw();
+        return;
+      }
+
       // Middle/right-button drag pans or zooms per the Drag Gestures settings.
       if (e.button === 1 || e.button === 2) {
         const action = e.button === 1 ? inputPrefs.mouseMiddle : inputPrefs.mouseRight;
@@ -1074,6 +1146,8 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
             : new Set([hit.id]);
         onSelect(hit.id, additive);
         modeRef.current = 'move';
+        moveKindRef.current = 'drag'; // button-drag keeps connections
+        effSelRef.current = effSel;
         moveStartRef.current = world;
         moveDeltaRef.current = { x: 0, y: 0 };
         const spec = planMove(schematic, libById, effSel);
@@ -1278,7 +1352,11 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
         draw();
         return;
       }
-      if (modeRef.current === 'move') {
+      if (modeRef.current === 'move' && grabbedRef.current) {
+        // A keyboard grabbed move ignores button-up; it commits on the next
+        // left click (handled in onPointerDown). Nothing to do here.
+        return;
+      } else if (modeRef.current === 'move') {
         const d = moveDeltaRef.current;
         const spec = moveSpecRef.current;
         if (d && spec && (d.x !== 0 || d.y !== 0)) {
