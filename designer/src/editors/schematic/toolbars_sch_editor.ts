@@ -33,7 +33,7 @@ export const TOP_TOOLBAR: ToolEntry[] = [
   { id: 'find', icon: 'find', title: 'Find (Ctrl+F)' },
   { id: 'findReplace', icon: 'replace', title: 'Find and Replace (Ctrl+Alt+F)' },
   sep,
-  { id: 'zoomRedraw', icon: 'zoomRedraw', title: 'Refresh (Ctrl+R)', disabled: true },
+  { id: 'zoomRedraw', icon: 'zoomRedraw', title: 'Refresh (Ctrl+R)' },
   { id: 'zoomIn', icon: 'zoomIn', title: 'Zoom In' },
   { id: 'zoomOut', icon: 'zoomOut', title: 'Zoom Out' },
   { id: 'zoomFit', icon: 'zoomFit', title: 'Zoom to Fit (Ctrl+0)' },

@@ -14,6 +14,11 @@ import {
   copySelectionText,
   parsePastedText,
   boxSelect,
+  symbolBodyBBox,
+  labelBox,
+  emptyBBox,
+  isEmpty,
+  includePoint,
   findMatches,
   replaceCommand,
   defaultSearchData,
@@ -1095,7 +1100,41 @@ export function SchematicEditor({
       if (id === 'zoomFit' || id === 'zoomFitObjects') controller.current?.zoomToFit();
       else if (id === 'zoomIn') controller.current?.zoomIn();
       else if (id === 'zoomOut') controller.current?.zoomOut();
-      else if (id === 'undo') undo();
+      else if (id === 'zoomRedraw') controller.current?.redraw();
+      else if (id === 'zoomFitSelection') {
+        // Zoom to Selected Objects: fit the view to the selection's extent.
+        const box = emptyBBox();
+        doc?.symbols.forEach((s, i) => {
+          if (selection.has(refId('symbol', s.uuid, i))) {
+            const b = symbolBodyBBox(s, libById.get(s.libId));
+            includePoint(box, { x: b.minX, y: b.minY });
+            includePoint(box, { x: b.maxX, y: b.maxY });
+          }
+        });
+        doc?.labels.forEach((l, i) => {
+          if (selection.has(refId('label', l.uuid, i))) {
+            const b = labelBox(l);
+            includePoint(box, { x: b.minX, y: b.minY });
+            includePoint(box, { x: b.maxX, y: b.maxY });
+          }
+        });
+        doc?.lines.forEach((l, i) => {
+          if (selection.has(refId('line', l.uuid, i))) {
+            includePoint(box, l.start);
+            includePoint(box, l.end);
+          }
+        });
+        doc?.junctions.forEach((j, i) => {
+          if (selection.has(refId('junction', j.uuid, i))) includePoint(box, j.at);
+        });
+        doc?.sheets.forEach((sh, i) => {
+          if (selection.has(refId('sheet', sh.uuid, i))) {
+            includePoint(box, sh.at);
+            includePoint(box, { x: sh.at.x + sh.size.w, y: sh.at.y + sh.size.h });
+          }
+        });
+        if (!isEmpty(box)) controller.current?.zoomToBox(box);
+      } else if (id === 'undo') undo();
       else if (id === 'redo') redo();
       else if (id === 'open') promptOpen();
       else if (id === 'save') save();
@@ -1162,6 +1201,9 @@ export function SchematicEditor({
       flatSheets,
       currentPath,
       switchSheet,
+      doc,
+      selection,
+      libById,
     ],
   );
 
@@ -1270,6 +1312,10 @@ export function SchematicEditor({
         // ACTIONS::zoomOut (Ctrl+-).
         e.preventDefault();
         controller.current?.zoomOut();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
+        // ACTIONS::zoomRedraw (Ctrl+R): repaint without changing the view.
+        e.preventDefault();
+        controller.current?.redraw();
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
         // ACTIONS::toggleGridOverrides (Ctrl+Shift+G).
         e.preventDefault();

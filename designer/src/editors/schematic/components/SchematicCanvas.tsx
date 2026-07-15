@@ -55,6 +55,7 @@ import {
   renderSchematic,
   drawErcMarkers,
   fitToContent,
+  fitToBBox,
   setRenderInvalidator,
   DEFAULT_RENDER_OPTS,
   type RenderOpts,
@@ -254,6 +255,10 @@ function constrain(anchor: Vec2, pt: Vec2, mode: LineMode): Vec2 {
 
 export interface CanvasController {
   zoomToFit: () => void;
+  /** Fit the view to a world-space box (Zoom to Selected Objects). */
+  zoomToBox: (box: { minX: number; minY: number; maxX: number; maxY: number }) => void;
+  /** Force a repaint without changing the view (Refresh / zoomRedraw). */
+  redraw: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
   /** Centre the viewport on a world point (used by ERC click-to-locate). */
@@ -757,6 +762,13 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
         viewportRef.current = fitToContent(schematic, c.width, c.height);
         draw();
       },
+      zoomToBox: (box) => {
+        const c = canvasRef.current;
+        if (!c || !sizedRef.current) return;
+        viewportRef.current = fitToBBox(box, c.width, c.height);
+        draw();
+      },
+      redraw: () => draw(),
       zoomIn: () => {
         const c = canvasRef.current;
         if (c) zoomAbout(c.width / 2, c.height / 2, 1.25);
