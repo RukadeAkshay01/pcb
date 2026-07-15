@@ -10,7 +10,7 @@
 import { microstripAnalyze } from './microstrip.js';
 import {
   type TranslineAnalysis,
-  type TranslineElectrical,
+  type TranslineAnalysis as _TA,
   bisectSolve,
   electricalLengthDeg,
   physicalLengthM,
@@ -51,7 +51,7 @@ export interface CoupledMicrostripResult extends TranslineAnalysis {
  */
 export function coupledMicrostripAnalyze(
   phys: CoupledMicrostripPhysical,
-  el: TranslineElectrical,
+  el: import('./tc_common.js').TcElectrical,
 ): CoupledMicrostripResult {
   const { widthM: w, gapM: s, heightM: h, thicknessM: t, lengthM: len } = phys;
   const er = el.epsilonR;
@@ -132,7 +132,7 @@ export function coupledMicrostripAnalyze(
  */
 export function coupledMicrostripSynthesize(
   phys: CoupledMicrostripPhysical,
-  el: TranslineElectrical,
+  el: import('./tc_common.js').TcElectrical,
   zDiffTarget: number,
   angleDeg: number,
 ): CoupledMicrostripPhysical | null {
