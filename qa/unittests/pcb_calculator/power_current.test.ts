@@ -38,29 +38,38 @@ describe('track width (IPC-2221)', () => {
 });
 
 describe('via size', () => {
+  // KiCad panel defaults — results must match its displayed values.
   const base = {
     holeDiaM: 0.4e-3,
-    platingM: 35e-6,
+    platingM: 0.035e-3,
     lengthM: 1.6e-3,
     padDiaM: 0.6e-3,
     clearanceDiaM: 1.0e-3,
+    z0Ohm: 50,
     epsilonR: 4.5,
     currentA: 1,
+    resistivity: 1.72e-8,
     deltaTC: 10,
+    riseTimeS: 1e-9,
   };
 
-  it('produces sane parasitics for a typical via', () => {
+  it('matches KiCad to the displayed precision', () => {
     const r = viaSize(base);
-    expect(r.resistanceOhm).toBeGreaterThan(1e-5);
-    expect(r.resistanceOhm).toBeLessThan(0.01);
-    // Typical 1.6 mm via: L ≈ 1 nH, C well under 1 pF.
-    expect(r.inductanceH).toBeGreaterThan(0.3e-9);
-    expect(r.inductanceH).toBeLessThan(3e-9);
-    expect(r.capacitanceF).toBeGreaterThan(0.1e-12);
-    expect(r.capacitanceF).toBeLessThan(2e-12);
-    expect(r.aspectRatio).toBeCloseTo(4, 6);
-    expect(r.ampacityA).toBeGreaterThan(1);
-    expect(r.thermalResistance).toBeGreaterThan(0);
+    expect(r.resistanceOhm).toBeCloseTo(0.000575362, 9);
+    expect(r.voltageDrop).toBeCloseTo(0.000575362, 9);
+    expect(r.powerLossW).toBeCloseTo(0.000575362, 9);
+    expect(r.thermalResistance).toBeCloseTo(83.2937, 3);
+    expect(r.ampacityA).toBeCloseTo(2.9993, 3);
+    expect(r.capacitanceF * 1e12).toBeCloseTo(0.599508, 5); // pF
+    expect(r.riseTimeDegradationS * 1e12).toBeCloseTo(32.9729, 3); // ps
+    expect(r.inductanceH * 1e9).toBeCloseTo(1.20723, 4); // nH
+    expect(r.reactanceOhm).toBeCloseTo(3.79262, 4);
+  });
+
+  it('reactance follows the pulse rise time (halving it doubles X)', () => {
+    const slow = viaSize(base);
+    const fast = viaSize({ ...base, riseTimeS: 0.5e-9 });
+    expect(fast.reactanceOhm).toBeCloseTo(2 * slow.reactanceOhm, 6);
   });
 
   it('capacitance is NaN when the antipad is smaller than the pad', () => {

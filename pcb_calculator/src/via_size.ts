@@ -1,14 +1,18 @@
 /**
  * Plated through-hole via characteristics: resistance, IPC-2221 ampacity,
- * thermal resistance, parasitic L/C and aspect ratio.
+ * thermal resistance, parasitic C/L, rise-time degradation and reactance.
  * Counterpart: KiCad `pcb_calculator/calculator_panels/panel_via_size.cpp`.
+ *
+ * The equations mirror the KiCad panel exactly (Johnson & Graham, "High-Speed
+ * Digital Design", and IPC-2221 for the ampacity), so results match to the
+ * displayed precision.
  */
 
-import {
-  COPPER_RESISTIVITY_OHM_M,
-  COPPER_TEMP_COEFF_PER_K,
-  ipc2221CurrentA,
-} from './tracks_width_versus_current_formula.js';
+export const COPPER_PLATING_RESISTIVITY_OHM_M = 1.72e-8;
+/** Thermal resistivity of copper plating, m·K/W (≙ 401 W/(m·K)). */
+export const COPPER_THERMAL_RESISTIVITY = 2.49e-3;
+
+const UNIT_MIL = 0.0254e-3; // 1 mil in metres
 
 export interface ViaSizeParams {
   /** Finished (drilled) hole diameter, m. */
@@ -21,18 +25,18 @@ export interface ViaSizeParams {
   padDiaM: number;
   /** Clearance-hole (antipad) diameter in planes, m (for capacitance). */
   clearanceDiaM: number;
-  /** Relative permittivity of the board. */
+  /** Characteristic impedance of the line, Ω (for rise-time degradation). */
+  z0Ohm: number;
+  /** Relative permittivity of the substrate. */
   epsilonR: number;
   /** Applied current, A. */
   currentA: number;
+  /** Plating resistivity, Ω·m. */
+  resistivity: number;
   /** Allowed temperature rise, °C (for ampacity). */
   deltaTC: number;
-  /** Plating resistivity, Ω·m. */
-  resistivity?: number;
-  /** Thermal conductivity of plating, W/(m·K). */
-  thermalCond?: number;
-  /** Ambient temperature, °C. */
-  ambientC?: number;
+  /** Signal pulse rise time, s (for reactance). */
+  riseTimeS: number;
 }
 
 export interface ViaSizeResult {
@@ -47,48 +51,53 @@ export interface ViaSizeResult {
   thermalResistance: number;
   /** Parasitic capacitance, F. */
   capacitanceF: number;
+  /** Rise-time degradation from the via capacitance, s. */
+  riseTimeDegradationS: number;
   /** Parasitic inductance, H. */
   inductanceH: number;
-  /** Reactance at 1 GHz, Ω (indicative). */
+  /** Reactance at the signal's effective frequency (1/2·riseTime), Ω. */
   reactanceOhm: number;
-  aspectRatio: number;
 }
 
 export function viaSize(p: ViaSizeParams): ViaSizeResult {
-  const rho = p.resistivity ?? COPPER_RESISTIVITY_OHM_M;
-  const kTherm = p.thermalCond ?? 401; // copper, W/(m·K)
-  const rOuter = p.holeDiaM / 2 + p.platingM;
-  const rInner = p.holeDiaM / 2;
-  const areaM2 = Math.PI * (rOuter * rOuter - rInner * rInner);
+  // Cross-sectional area of the plated barrel: π·(D + t)·t = π·((D/2+t)²−(D/2)²).
+  const area = Math.PI * (p.holeDiaM + p.platingM) * p.platingM;
 
-  // Barrel resistance at the risen temperature, like the track panel.
-  const tempC = (p.ambientC ?? 20) + p.deltaTC;
-  const rhoHot = rho * (1 + COPPER_TEMP_COEFF_PER_K * (tempC - 20));
-  const resistanceOhm = (rhoHot * p.lengthM) / areaM2;
-  const voltageDrop = resistanceOhm * p.currentA;
+  const resistanceOhm = (p.resistivity * p.lengthM) / area;
+  const voltageDrop = p.currentA * resistanceOhm;
+  const powerLossW = p.currentA * voltageDrop;
 
-  // Capacitance (pF): C = 1.41 · εr · T · D1 / (D2 − D1), dimensions in inch.
-  const inch = 0.0254;
-  const t = p.lengthM / inch;
-  const d1 = p.padDiaM / inch;
-  const d2 = p.clearanceDiaM / inch;
-  const capacitanceF = d2 > d1 ? ((1.41 * p.epsilonR * t * d1) / (d2 - d1)) * 1e-12 : NaN;
+  const thermalResistance = (COPPER_THERMAL_RESISTIVITY * p.lengthM) / area;
 
-  // Inductance (nH): L = h/5 · (1 + ln(4h/d)), h and d in mm.
-  const hMm = p.lengthM * 1000;
-  const dMm = p.holeDiaM * 1000;
-  const inductanceH = (hMm / 5) * (1 + Math.log((4 * hMm) / dMm)) * 1e-9;
+  // IPC-2221 ampacity uses the barrel area in mil².
+  const areaMil2 = area / (UNIT_MIL * UNIT_MIL);
+  const ampacityA = 0.048 * p.deltaTC ** 0.44 * areaMil2 ** 0.725;
+
+  // Capacitance (F): 55.51·εr·L·D_pad / (D_clear − D_pad), lengths in metres.
+  const capacitanceF =
+    p.clearanceDiaM > p.padDiaM
+      ? (55.51e-12 * p.epsilonR * p.lengthM * p.padDiaM) / (p.clearanceDiaM - p.padDiaM)
+      : NaN;
+
+  // 10–90 % rise-time degradation: 2.2·C·(Z0/2).
+  const riseTimeDegradationS = (2.2 * capacitanceF * p.z0Ohm) / 2;
+
+  // Inductance (H): (μ0/2π)·L·(ln(4L/D) + 1) = 200 nH/m · L · (…).
+  const inductanceH = 2e-7 * p.lengthM * (Math.log((4 * p.lengthM) / p.holeDiaM) + 1);
+
+  // Reactance at the signal frequency implied by the pulse rise time.
+  const reactanceOhm = (Math.PI * inductanceH) / p.riseTimeS;
 
   return {
-    areaM2,
+    areaM2: area,
     resistanceOhm,
     voltageDrop,
-    powerLossW: voltageDrop * p.currentA,
-    ampacityA: ipc2221CurrentA(areaM2, p.deltaTC, false),
-    thermalResistance: p.lengthM / (kTherm * areaM2),
+    powerLossW,
+    ampacityA,
+    thermalResistance,
     capacitanceF,
+    riseTimeDegradationS,
     inductanceH,
-    reactanceOhm: 2 * Math.PI * 1e9 * inductanceH,
-    aspectRatio: p.lengthM / p.holeDiaM,
+    reactanceOhm,
   };
 }
