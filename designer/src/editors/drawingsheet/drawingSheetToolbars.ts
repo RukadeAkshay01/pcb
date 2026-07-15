@@ -11,7 +11,7 @@
  *            interactive delete tool.
  */
 
-import type { ToolEntry } from '../../ui/toolbars.js';
+import type { ToolEntry } from '../../ui/Toolbar.js';
 
 const sep: ToolEntry = 'sep';
 
