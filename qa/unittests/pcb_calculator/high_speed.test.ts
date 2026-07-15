@@ -288,6 +288,15 @@ describe('coupled microstrip', () => {
     expect(r.extra.zDiff).toBeCloseTo(2 * r.extra.z0Odd, 9);
   });
 
+  it('matches the ported KiCad model (regression pin)', () => {
+    // W=0.3, S=0.2, H=0.2 mm, T=35 µm, εr=4.5, tanδ=0.02 @ 1 GHz.
+    const r = coupledMicrostripAnalyze(phys, el);
+    expect(r.extra.z0Even).toBeCloseTo(65.151, 2);
+    expect(r.extra.z0Odd).toBeCloseTo(48.083, 2);
+    expect(r.extra.epsEffEven).toBeCloseTo(3.5385, 3);
+    expect(r.extra.epsEffOdd).toBeCloseTo(3.0767, 3);
+  });
+
   it('wider gap decouples: Ze and Zo converge toward the single line', () => {
     const tight = coupledMicrostripAnalyze(phys, el);
     const loose = coupledMicrostripAnalyze({ ...phys, gapM: 2e-3 }, el);

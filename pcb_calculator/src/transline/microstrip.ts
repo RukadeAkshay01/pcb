@@ -35,6 +35,8 @@ export interface MicrostripPhysical {
 export interface MicrostripResult extends TranslineAnalysis {
   /** Static (undispersed) effective permittivity, for reference. */
   epsEffStatic: number;
+  /** Static (undispersed) characteristic impedance, Ω (KiCad Z0_0). */
+  z0Static: number;
 }
 
 // --- Hammerstad–Jensen building blocks (KiCad names kept) ---
@@ -188,6 +190,7 @@ export function microstripAnalyze(phys: MicrostripPhysical, el: TcElectrical): M
     z0: z0F,
     epsEff: erEffF,
     epsEffStatic: erEff0,
+    z0Static,
     angleDeg: (angLRad * 180) / Math.PI,
     conductorLossDb: alphaC * phys.lengthM,
     dielectricLossDb: alphaD * phys.lengthM,
