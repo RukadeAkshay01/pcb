@@ -17,6 +17,11 @@ import {
   traceRegions,
   OUTLINE_LAYERS,
 } from '@ziroeda/designer/src/editors/image/bitmap2component.js';
+import {
+  convertOutputSize,
+  initialOutputSize,
+  outputDpi,
+} from '@ziroeda/designer/src/editors/image/imageSize.js';
 
 /** A bitmap with a filled rectangle [x0,x1) × [y0,y1). */
 function filledRect(w: number, h: number, x0: number, y0: number, x1: number, y1: number): Bitmap {
@@ -74,11 +79,51 @@ describe('tracing', () => {
   });
 });
 
+describe('output size (KiCad IMAGE_SIZE)', () => {
+  it('reproduces the native size and round-trips to the original DPI', () => {
+    // 300 px @ 300 PPI → 25.4 mm; that size exports back at 300 DPI.
+    expect(initialOutputSize(300, 300, 'mm')).toBeCloseTo(25.4, 6);
+    expect(initialOutputSize(300, 300, 'inch')).toBeCloseTo(1, 6);
+    expect(initialOutputSize(300, 300, 'dpi')).toBe(300);
+    expect(outputDpi(25.4, 300, 'mm')).toBeCloseTo(300, 6);
+    expect(outputDpi(1, 300, 'inch')).toBeCloseTo(300, 6);
+    expect(outputDpi(300, 300, 'dpi')).toBe(300);
+  });
+
+  it('doubling the physical size halves the export DPI (bigger artwork)', () => {
+    expect(outputDpi(50.8, 300, 'mm')).toBeCloseTo(150, 6);
+  });
+
+  it('converts between units keeping the physical size', () => {
+    expect(convertOutputSize(25.4, 300, 'mm', 'inch')).toBeCloseTo(1, 6);
+    expect(convertOutputSize(1, 300, 'inch', 'mm')).toBeCloseTo(25.4, 6);
+    // 25.4 mm of 300 px is 300 DPI
+    expect(convertOutputSize(25.4, 300, 'mm', 'dpi')).toBeCloseTo(300, 6);
+    expect(convertOutputSize(300, 300, 'dpi', 'mm')).toBeCloseTo(25.4, 6);
+  });
+});
+
+describe('layer choices', () => {
+  it('matches KiCad bitmap2cmp order and mapping', () => {
+    expect(OUTLINE_LAYERS.map((l) => l.id)).toEqual([
+      'F.Cu',
+      'F.SilkS',
+      'F.Mask',
+      'Dwgs.User',
+      'Cmts.User',
+      'Eco1.User',
+      'Eco2.User',
+      'F.Fab',
+    ]);
+    expect(OUTLINE_LAYERS[1]!.label).toBe('F.Silkscreen');
+  });
+});
+
 describe('footprint output', () => {
   const bm = filledRect(24, 24, 6, 6, 18, 18);
 
   it('parses into a footprint with a filled polygon on the chosen layer', () => {
-    const layer = OUTLINE_LAYERS[0]!.id; // F.SilkS
+    const layer = OUTLINE_LAYERS[1]!.id; // F.SilkS
     const { text, filename } = convert(bm, {
       format: 'footprint',
       layer,

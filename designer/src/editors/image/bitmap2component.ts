@@ -34,15 +34,21 @@ export interface LayerChoice {
   label: string;
 }
 
-/** The choices offered by KiCad's Image Converter, in the same order. */
+/**
+ * The "Layer:" choices offered by KiCad's Image Converter, in the exact order
+ * and with the exact display labels of `bitmap2cmp_panel_base` — the label is
+ * what the dropdown shows, the id is the file layer name it maps to
+ * (`ExportToBuffer`'s switch). Index 0 (F.Cu) is the KiCad default.
+ */
 export const OUTLINE_LAYERS: LayerChoice[] = [
-  { id: 'F.SilkS', label: 'Front silk screen' },
-  { id: 'F.Mask', label: 'Front solder mask' },
-  { id: 'Eco1.User', label: 'User layer Eco1' },
-  { id: 'Eco2.User', label: 'User layer Eco2' },
-  { id: 'Cmts.User', label: 'User layer Comments' },
-  { id: 'Dwgs.User', label: 'User layer Drawings' },
-  { id: 'F.Fab', label: 'Front Fab' },
+  { id: 'F.Cu', label: 'F.Cu' },
+  { id: 'F.SilkS', label: 'F.Silkscreen' },
+  { id: 'F.Mask', label: 'F.Mask' },
+  { id: 'Dwgs.User', label: 'User.Drawings' },
+  { id: 'Cmts.User', label: 'User.Comments' },
+  { id: 'Eco1.User', label: 'User.Eco1' },
+  { id: 'Eco2.User', label: 'User.Eco2' },
+  { id: 'F.Fab', label: 'F.Fab' },
 ];
 
 export interface ConvertOptions {
@@ -109,11 +115,15 @@ export function monoToRGBA(bm: Bitmap): ImageData {
   return new ImageData(out, bm.w, bm.h);
 }
 
-/** Render greyscale bytes to RGBA for the "Greyscale" preview tab. */
-export function grayToRGBA(img: GrayImage): ImageData {
+/**
+ * Render greyscale bytes to RGBA for the "Greyscale" preview tab. With
+ * `negative`, the levels are inverted — KiCad negates the greyscale image
+ * itself when Negative is ticked, so the preview shows the negated version.
+ */
+export function grayToRGBA(img: GrayImage, negative = false): ImageData {
   const out = new Uint8ClampedArray(img.w * img.h * 4);
   for (let i = 0; i < img.w * img.h; i++) {
-    const v = img.gray[i]!;
+    const v = negative ? 255 - img.gray[i]! : img.gray[i]!;
     out[i * 4] = v;
     out[i * 4 + 1] = v;
     out[i * 4 + 2] = v;
