@@ -35,11 +35,19 @@ export async function loadDemos(): Promise<DemoMeta[]> {
 
 const encodeRel = (rel: string): string => rel.split('/').map(encodeURIComponent).join('/');
 
-/** Fetch a demo's files, nested under a folder named for the demo. */
-export async function openDemo(d: DemoMeta): Promise<PickedHomeFile[]> {
+/** Fetch a demo's files, nested under a folder named for the demo.
+ *  `onProgress(done, total, file)` ticks per downloaded file so the caller can
+ *  show a determinate "Downloading… n of m" gauge while the CDN responds. */
+export async function openDemo(
+  d: DemoMeta,
+  onProgress?: (done: number, total: number, file: string) => void,
+): Promise<PickedHomeFile[]> {
   const out: PickedHomeFile[] = [];
+  let done = 0;
   for (const rel of d.files) {
     const res = await fetch(`${DEMOS_BASE}/${encodeRel(d.id)}/${encodeRel(rel)}`);
+    done++;
+    onProgress?.(done, d.files.length, rel);
     if (!res.ok) continue;
     const bytes = new Uint8Array(await res.arrayBuffer());
     out.push({ name: `${d.base}/${rel}`, text: dec.decode(bytes), bytes });

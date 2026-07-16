@@ -97,6 +97,7 @@ import { DialogPrint } from './dialogs/dialog_print.js';
 import { DialogPlot, type PlotFormat } from './dialogs/dialog_plot.js';
 import { printSheet, plotPng, plotSvg, plotPdf, type PlotOpts } from './render/plot.js';
 import { LoadingOverlay, nextPaint } from '../../ui/LoadingOverlay.js';
+import type { ProgressSnapshot } from '../../ui/progress_reporter.js';
 import { PreferencesDialog } from '../../prefs/PreferencesDialog.js';
 import { settings, gridSizeToIU } from '../../prefs/settings.js';
 import {
@@ -209,8 +210,9 @@ export function SchematicEditor({
   // The active sheet *instance* (KiCad SCH_SHEET_PATH). Distinct from currentFile
   // so two instances of one shared document highlight/navigate independently.
   const [currentPath, setCurrentPath] = useState<string>('/');
-  // KiCad's "Load Schematic" progress: non-null while parsing/saving a project.
-  const [loading, setLoading] = useState<string | null>(null);
+  // KiCad's "Load Schematic" progress: non-null while parsing/saving a project
+  // (a plain message, or a snapshot with the per-sheet parse gauge).
+  const [loading, setLoading] = useState<string | ProgressSnapshot | null>(null);
   // Register the initial sheet's undo stack so returning to it keeps its history.
   useEffect(() => {
     histories.current.set(DEFAULT_FILE, history.current);
@@ -642,6 +644,13 @@ export function SchematicEditor({
         const docs = new Map<string, Schematic>();
         const problems: string[] = [];
         let proName: string | undefined;
+        // Parse sheet by sheet with a per-sheet gauge (KiCad's "Loading
+        // Schematic" progress dialog), yielding a paint between sheets so the
+        // bar advances even though each parse is synchronous.
+        const sheets = files.filter((f) =>
+          /\.kicad_sch$/i.test(f.name.split('/').pop()!.split('\\').pop()!),
+        );
+        let parsed = 0;
         for (const f of files) {
           const base = f.name.split('/').pop()!.split('\\').pop()!;
           if (/\.kicad_pro$/i.test(base)) {
@@ -649,11 +658,18 @@ export function SchematicEditor({
             continue;
           }
           if (!/\.kicad_sch$/i.test(base)) continue;
+          setLoading({
+            message: `Loading schematic: ${base}`,
+            detail: `${parsed + 1} of ${sheets.length} sheets`,
+            value: parsed / sheets.length,
+          });
+          if (sheets.length > 1) await nextPaint();
           try {
             docs.set(base, { ...readSchematic(parse(f.text)), fileName: base });
           } catch (e) {
             problems.push(`${base}: ${e instanceof Error ? e.message : String(e)}`);
           }
+          parsed++;
         }
         if (docs.size === 0) {
           setError(problems[0] ?? 'No .kicad_sch files in the selection');

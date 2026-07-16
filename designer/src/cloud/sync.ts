@@ -14,8 +14,11 @@ import { authEnabled } from '../auth/supabaseClient.js';
 import { exportProject, importProject, listSyncMeta } from '../home/projectStore.js';
 import { cloudDelete, cloudGet, cloudListMeta, cloudUpsert } from './cloudStore.js';
 
+/** Progress callback: `done` of `total` transfers finished so far. */
+export type SyncProgress = (done: number, total: number) => void;
+
 /** Reconcile all local and cloud projects for the signed-in user. */
-export async function syncAllProjects(userId: string): Promise<void> {
+export async function syncAllProjects(userId: string, onProgress?: SyncProgress): Promise<void> {
   if (!authEnabled) return;
 
   const [localMeta, cloudMeta] = await Promise.all([listSyncMeta(), cloudListMeta()]);
@@ -23,24 +26,40 @@ export async function syncAllProjects(userId: string): Promise<void> {
   const cloud = new Map(cloudMeta.map((m) => [m.id, m.updatedAt]));
 
   const ids = new Set([...local.keys(), ...cloud.keys()]);
-  const pushes: Promise<void>[] = [];
-  const pulls: Promise<void>[] = [];
+  const ops: Promise<void>[] = [];
+
+  // Count the transfers up front so the UI can show "n of m", ticking one as
+  // each push/pull settles (order of completion, not of dispatch).
+  let done = 0;
+  const tick = (): void => {
+    done++;
+    onProgress?.(done, ops.length);
+  };
+  const track = (p: Promise<void>): void => {
+    ops.push(
+      p.then(tick, (e) => {
+        tick();
+        throw e;
+      }),
+    );
+  };
 
   for (const id of ids) {
     const lt = local.get(id);
     const ct = cloud.get(id);
 
     if (lt !== undefined && ct === undefined) {
-      pushes.push(pushOne(userId, id));
+      track(pushOne(userId, id));
     } else if (lt === undefined && ct !== undefined) {
-      pulls.push(pullOne(id));
+      track(pullOne(id));
     } else if (lt !== undefined && ct !== undefined && lt !== ct) {
-      if (lt > ct) pushes.push(pushOne(userId, id));
-      else pulls.push(pullOne(id));
+      if (lt > ct) track(pushOne(userId, id));
+      else track(pullOne(id));
     }
   }
 
-  await Promise.all([...pushes, ...pulls]);
+  if (ops.length > 0) onProgress?.(0, ops.length);
+  await Promise.all(ops);
 }
 
 async function pushOne(userId: string, id: string): Promise<void> {

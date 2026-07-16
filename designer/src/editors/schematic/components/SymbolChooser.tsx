@@ -48,10 +48,20 @@ export function SymbolChooser({
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel, onPick, previewSym]);
 
+  // Which library is being fetched for the preview (first click into a library
+  // downloads + parses its .kicad_sym), so the pane says so instead of sitting
+  // on the previous symbol.
+  const [fetchingLib, setFetchingLib] = useState<string | null>(null);
+
   const highlight = async (library: string, name: string) => {
     setPreviewId(`${library}:${name}`);
-    const sym = await loadSymbol(library, name);
-    if (sym) setPreviewSym(sym);
+    setFetchingLib(library);
+    try {
+      const sym = await loadSymbol(library, name);
+      if (sym) setPreviewSym(sym);
+    } finally {
+      setFetchingLib(null);
+    }
   };
 
   // Render the preview whenever the selected symbol changes.
@@ -184,7 +194,15 @@ export function SymbolChooser({
           </div>
           <div className="ze-chooser-right">
             {/* Symbol preview (top) — mirrors KiCad's SYMBOL_PREVIEW_WIDGET. */}
-            <canvas ref={canvasRef} className="ze-preview-canvas" />
+            <div style={{ flex: 11, minHeight: 0, position: 'relative', display: 'flex' }}>
+              <canvas ref={canvasRef} className="ze-preview-canvas" style={{ flex: 1 }} />
+              {fetchingLib && (
+                <div className="ze-canvas-loading" style={{ color: '#555' }}>
+                  <span className="ze-spinner" />
+                  <span>Loading {fetchingLib}…</span>
+                </div>
+              )}
+            </div>
 
             {/* Footprint selector strip + preview (bottom) — mirrors the FOOTPRINT_SELECT/
                 PREVIEW widgets, gated by "Show footprint previews in Symbol Chooser".

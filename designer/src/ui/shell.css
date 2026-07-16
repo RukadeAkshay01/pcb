@@ -757,6 +757,60 @@ body {
     transform: rotate(360deg);
   }
 }
+/* Determinate progress (ProgressReporter → LoadingOverlay): the gauge under
+   the message, like KiCad's WX_PROGRESS_REPORTER dialog. */
+.ze-loading-card.with-progress {
+  min-width: 320px;
+  align-items: flex-start;
+}
+.ze-loading-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.ze-loading-detail {
+  font-size: 11px;
+  color: #aaa;
+}
+.ze-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.ze-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #e07b1a;
+  transition: width 0.15s ease-out;
+}
+/* Cloud-sync status pill (bottom-right, non-blocking): shows pull/push counts
+   while projects sync on sign-in, then a brief "synced" confirmation. */
+.ze-sync-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 20px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+.ze-sync-pill .ze-spinner {
+  width: 13px;
+  height: 13px;
+}
+.ze-sync-pill.done {
+  color: #7fce7f;
+}
 /* Spinner centered over a canvas while its document parses (PCB/board load). */
 .ze-canvas-loading {
   position: absolute;

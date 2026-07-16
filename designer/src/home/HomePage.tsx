@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../auth/AuthProvider.js';
 import { syncAllProjects, pushProject, deleteCloudProject } from '../cloud/sync.js';
 import { LoadingOverlay, nextPaint } from '../ui/LoadingOverlay.js';
+import type { ProgressSnapshot } from '../ui/progress_reporter.js';
 import { loadTemplates, createFromTemplate, type TemplateMeta } from './templates.js';
 import { loadDemos, openDemo, type DemoMeta } from './demos.js';
 import '../ui/shell.css';
@@ -219,16 +220,33 @@ export function HomePage({
     if (!d) return;
     // Demos open as themselves and are not persisted over an existing store
     // entry unless the user saves — mirror a plain folder open (persist like
-    // any opened project so it lands in Recent).
-    const files = await openDemo(d);
+    // any opened project so it lands in Recent). The files stream from the
+    // hosted CDN, so show a per-file download gauge while they arrive.
+    setLoading({ message: `Downloading demo: ${d.title}`, value: 0 });
+    let files: PickedHomeFile[];
+    try {
+      files = await openDemo(d, (done, total, file) =>
+        setLoading({
+          message: `Downloading demo: ${d.title}`,
+          detail: `${file} — ${done} of ${total} files`,
+          value: done / total,
+        }),
+      );
+    } finally {
+      setLoading(null);
+    }
     if (files.length === 0) return;
     await ingest(files.map((f) => ({ name: f.name, bytesOf: async () => f.bytes! })));
   };
   // Project-tree pane width (px), draggable like KiCad's wxAUI sash.
   const [panelWidth, setPanelWidth] = useState(290);
   // Non-null while opening/saving a project — drives KiCad's "Load Schematic"
-  // style progress overlay so the UI doesn't look frozen mid-load.
-  const [loading, setLoading] = useState<string | null>(null);
+  // style progress overlay (message + optional gauge) so the UI doesn't look
+  // frozen mid-load.
+  const [loading, setLoading] = useState<string | ProgressSnapshot | null>(null);
+  // Cloud sync status pill (non-blocking, bottom-right): transfers done/total
+  // while projects reconcile on sign-in, then a brief "synced" confirmation.
+  const [syncState, setSyncState] = useState<{ done: number; total: number } | 'done' | null>(null);
   const refreshSaved = (): void => {
     if (storageAvailable()) void listProjects().then(setSaved);
   };
@@ -240,11 +258,26 @@ export function HomePage({
   useEffect(() => {
     if (!userId || !storageAvailable()) return;
     let cancelled = false;
-    void syncAllProjects(userId)
+    void syncAllProjects(userId, (done, total) => {
+      // Refresh the list as projects land so pulled ones appear immediately,
+      // not only after the whole reconcile finishes.
+      if (!cancelled) {
+        setSyncState({ done, total });
+        if (done > 0) refreshSaved();
+      }
+    })
       .then(() => {
         if (!cancelled) refreshSaved();
       })
-      .catch((e) => console.warn('Cloud sync failed:', e));
+      .catch((e) => console.warn('Cloud sync failed:', e))
+      .finally(() => {
+        if (cancelled) return;
+        // Flip the pill to its "synced" confirmation, then fade it out.
+        setSyncState((s) => (s && s !== 'done' ? 'done' : null));
+        setTimeout(() => {
+          if (!cancelled) setSyncState(null);
+        }, 2500);
+      });
     return () => {
       cancelled = true;
     };
@@ -267,15 +300,21 @@ export function HomePage({
   // storage layer gzips text ~10x, so keeping the libs is cheap. The project is
   // persisted to IndexedDB so it survives a reload with no login.
   const ingest = async (files: IngestFile[], persist = true): Promise<void> => {
-    setLoading('Reading files…');
+    setLoading({ message: 'Reading files…', value: 0 });
     await nextPaint(); // show the overlay before the main thread gets busy
     try {
       const out: PickedHomeFile[] = [];
-      for (const f of files) {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i]!;
         const base = f.name.split('/').pop()!;
         if (base.startsWith('.')) continue;
         const bytes = await f.bytesOf();
         out.push({ name: f.name, text: dec.decode(bytes), bytes });
+        setLoading({
+          message: 'Reading files…',
+          detail: `${base} — ${i + 1} of ${files.length}`,
+          value: (i + 1) / files.length,
+        });
       }
       if (out.length === 0) return;
       setPicked(out);
@@ -870,6 +909,20 @@ export function HomePage({
         />
       )}
       {prefsOpen && <PreferencesDialog onClose={() => setPrefsOpen(false)} />}
+
+      {/* Cloud-sync status (non-blocking): projects reconciling on sign-in. */}
+      {syncState && (
+        <div className={`ze-sync-pill${syncState === 'done' ? ' done' : ''}`}>
+          {syncState === 'done' ? (
+            <>✓ Projects synced</>
+          ) : (
+            <>
+              <span className="ze-spinner" />
+              Syncing cloud projects… {syncState.done} of {syncState.total}
+            </>
+          )}
+        </div>
+      )}
 
       <LoadingOverlay label={loading} />
     </div>
