@@ -28,12 +28,20 @@ export function SignInDialog({ onClose }: { onClose: () => void }): JSX.Element 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Server misconfiguration (e.g. the Google provider not enabled in the
+  // Supabase dashboard) surfaces as a raw API error — translate it into
+  // guidance that points at the always-available email-code flow.
+  const friendly = (message: string): string =>
+    /provider is not enabled/i.test(message)
+      ? 'Google sign-in is not enabled on this server yet — use the email code below instead.'
+      : message;
+
   const run = async (fn: () => Promise<{ error: string | null }>): Promise<boolean> => {
     setError(null);
     setBusy(true);
     try {
       const { error } = await fn();
-      if (error) setError(error);
+      if (error) setError(friendly(error));
       return !error;
     } finally {
       setBusy(false);
