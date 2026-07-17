@@ -97,6 +97,7 @@ import {
 } from './dialogs/dialog_schematic_setup.js';
 import { DialogExportBom } from './dialogs/dialog_export_bom.js';
 import { DialogSymbolFieldsTable, type FieldsEdits } from './dialogs/dialog_symbol_fields_table.js';
+import { DialogAssignFootprints } from './dialogs/dialog_assign_footprints.js';
 import { DialogPrint } from './dialogs/dialog_print.js';
 import { DialogPlot, type PlotFormat } from './dialogs/dialog_plot.js';
 import { printSheet, plotPng, plotSvg, plotPdf, type PlotOpts } from './render/plot.js';
@@ -545,6 +546,8 @@ export function SchematicEditor({
   const [fieldsTableOpen, setFieldsTableOpen] = useState(false);
   // Symbol Library Browser (SYMBOL_VIEWER_FRAME).
   const [browserOpen, setBrowserOpen] = useState(false);
+  // Assign Footprints (CVPCB_MAINFRAME).
+  const [assignFpOpen, setAssignFpOpen] = useState(false);
   const runAnnotate = useCallback(
     (opts: AnnotateOptions) => {
       runCommand(annotateCommand(libById, opts, selection));
@@ -1344,6 +1347,7 @@ export function SchematicEditor({
       else if (id === 'bom') setBomOpen(true);
       else if (id === 'editSymbolFields') setFieldsTableOpen(true);
       else if (id === 'symbolBrowser') setBrowserOpen(true);
+      else if (id === 'assignFootprints') setAssignFpOpen(true);
       else if (id === 'openPreferences') setPrefsOpen(true);
       else if (id === 'close') onExitToHome();
       else if (id === 'find') openFindDialog('find');
@@ -1993,6 +1997,18 @@ export function SchematicEditor({
               docs={liveDocs()}
               onApply={applyFieldsEdits}
               onClose={() => setFieldsTableOpen(false)}
+            />
+          )}
+          {/* Assign Footprints (cvpcb): assignments apply as Footprint field
+              edits through the same per-sheet pathway as the fields table. */}
+          {assignFpOpen && (
+            <DialogAssignFootprints
+              docs={liveDocs()}
+              onApply={(edits) => {
+                applyFieldsEdits(edits);
+                setAssignFpOpen(false);
+              }}
+              onClose={() => setAssignFpOpen(false)}
             />
           )}
           {/* Symbol Library Browser: "Add Symbol to Schematic" attaches the pick

@@ -253,7 +253,7 @@ export function buildMenus(h: MenuHandlers, checks: MenuChecks = {}): Menu[] {
         act('Annotate Schematic...', 'annotate', 'annotate'),
         stub('Increment Annotations From...'),
         SEP,
-        stub('Assign Footprints...'),
+        act('Assign Footprints...', 'assignFp', 'assignFootprints'),
         act('Generate Bill of Materials...', 'bom', 'bom'),
         stub('Generate Legacy Bill of Materials...'),
         SEP,
