@@ -52,7 +52,7 @@ export const TOP_TOOLBAR: ToolEntry[] = [
   { id: 'ungroup', icon: 'ungroup', title: 'Ungroup Items', disabled: true },
   sep,
   { id: 'symbolEditor', icon: 'symbolEditor', title: 'Symbol Editor' },
-  { id: 'symbolBrowser', icon: 'symbolBrowser', title: 'Symbol Library Browser', disabled: true },
+  { id: 'symbolBrowser', icon: 'symbolBrowser', title: 'Symbol Library Browser' },
   { id: 'footprintEditor', icon: 'footprintEditor', title: 'Footprint Editor' },
   sep,
   { id: 'annotate', icon: 'annotate', title: 'Annotate Schematic...' },

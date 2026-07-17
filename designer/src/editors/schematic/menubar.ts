@@ -159,7 +159,7 @@ export function buildMenus(h: MenuHandlers, checks: MenuChecks = {}): Menu[] {
           ],
         },
         SEP,
-        stub('Symbol Library Browser'),
+        act('Symbol Library Browser', 'symbolBrowser', 'symbolBrowser'),
         SEP,
         act('Zoom In', 'zoomIn', 'zoomIn'),
         act('Zoom Out', 'zoomOut', 'zoomOut'),

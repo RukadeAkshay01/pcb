@@ -75,6 +75,7 @@ import { LabelDialog } from './components/LabelDialog.js';
 import { SymbolPropertiesDialog } from './components/SymbolPropertiesDialog.js';
 import { ErcDialog } from './components/ErcDialog.js';
 import { SymbolChooser } from './components/SymbolChooser.js';
+import { SymbolLibraryBrowser } from './components/SymbolLibraryBrowser.js';
 import { Toolbar } from '../../ui/Toolbar.js';
 import { TOP_TOOLBAR, LEFT_TOOLBAR, RIGHT_TOOLBAR } from './toolbars_sch_editor.js';
 import { MenuBar } from '../../ui/MenuBar.js';
@@ -542,6 +543,8 @@ export function SchematicEditor({
   const [bomOpen, setBomOpen] = useState(false);
   // Bulk Edit Symbol Fields (Symbol Fields Table edit view) dialog.
   const [fieldsTableOpen, setFieldsTableOpen] = useState(false);
+  // Symbol Library Browser (SYMBOL_VIEWER_FRAME).
+  const [browserOpen, setBrowserOpen] = useState(false);
   const runAnnotate = useCallback(
     (opts: AnnotateOptions) => {
       runCommand(annotateCommand(libById, opts, selection));
@@ -1340,6 +1343,7 @@ export function SchematicEditor({
       else if (id === 'footprintEditor') onShowFootprintEditor?.();
       else if (id === 'bom') setBomOpen(true);
       else if (id === 'editSymbolFields') setFieldsTableOpen(true);
+      else if (id === 'symbolBrowser') setBrowserOpen(true);
       else if (id === 'openPreferences') setPrefsOpen(true);
       else if (id === 'close') onExitToHome();
       else if (id === 'find') openFindDialog('find');
@@ -1989,6 +1993,18 @@ export function SchematicEditor({
               docs={liveDocs()}
               onApply={applyFieldsEdits}
               onClose={() => setFieldsTableOpen(false)}
+            />
+          )}
+          {/* Symbol Library Browser: "Add Symbol to Schematic" attaches the pick
+              to the cursor exactly like the Place Symbol chooser. */}
+          {browserOpen && (
+            <SymbolLibraryBrowser
+              onPick={(lib) => {
+                setBrowserOpen(false);
+                setPlaceLib(lib);
+                setActiveTool('placeSymbol');
+              }}
+              onClose={() => setBrowserOpen(false)}
             />
           )}
         </div>
