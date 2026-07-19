@@ -14,7 +14,6 @@ import type { PickedHomeFile } from './files.js';
 import {
   basename,
   isHiddenFile,
-  isRootFileName,
   isViewableTextFile,
   treeIconFor,
   type DirNode,
@@ -41,7 +40,7 @@ export function ProjectTreePane({
   picked,
   dirRoot,
   rootLabel,
-  projLower,
+  projectNames,
   width,
   expanded,
   onToggleDir,
@@ -65,7 +64,10 @@ export function ProjectTreePane({
   dirRoot: DirNode | null;
   /** The tree root shows the full .kicad_pro filename (m_root = fn.GetFullName()). */
   rootLabel: string;
-  projLower: string;
+  /** Basenames (lowercased, no extension) of every .kicad_pro in the folder —
+   *  KiCad's getProjects(dir). A .kicad_sch shows only when its basename is one
+   *  of these (the root sheet of some project); subsheets stay hidden. */
+  projectNames: ReadonlySet<string>;
   width: number;
   expanded: Set<string>;
   onToggleDir: (path: string) => void;
@@ -87,17 +89,22 @@ export function ProjectTreePane({
   onOpenProjectPicker: () => void;
   onSelectFiles: () => void;
 }): JSX.Element {
-  // Like KiCad's addItemToProjectTree: a schematic is only listed when its
-  // basename matches the active project (i.e. the root sheet). Sub-sheets and
-  // other projects' sheets are hidden here — they live in the editor's
-  // hierarchy navigator, or appear when that project is made active.
-  // A folder may hold several projects: the active project's .kicad_pro is the
-  // root row (hidden as a child); the other .kicad_pro files stay visible so
-  // they can be double-clicked to switch project.
+  // KiCad's addItemToProjectTree: a .kicad_sch is listed only when its basename
+  // is one of the folder's project names (getProjects) — i.e. the root sheet of
+  // *some* project. Sub-sheets hide (they live in the editor's hierarchy
+  // navigator). A folder may hold several projects: the active project's
+  // .kicad_pro is the bold root row (hidden as a child, like KiCad's
+  // `filename != fn.GetFullName()`); every other file — including the other
+  // projects' .kicad_pro, .kicad_sch and .kicad_pcb — stays visible, and their
+  // .kicad_pro can be double-clicked to switch project.
   const isHiddenNode = (name: string): boolean => {
     const base = name.split(/[\\/]/).pop() ?? name;
     if (/\.kicad_pro$/i.test(base)) return base === rootLabel;
-    return isHiddenFile(name) || (/\.kicad_sch$/i.test(name) && !isRootFileName(name, projLower));
+    if (/\.kicad_sch$/i.test(base)) {
+      const stem = base.replace(/\.kicad_sch$/i, '').toLowerCase();
+      return !projectNames.has(stem);
+    }
+    return isHiddenFile(name);
   };
 
   // Right-click context menu (upstream popup, web-applicable subset).

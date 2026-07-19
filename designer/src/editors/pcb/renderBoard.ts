@@ -27,7 +27,7 @@ import {
   type PcbShape,
   type PcbTextItem,
 } from '@ziroeda/pcbnew';
-import { PCB_PAINT_ORDER, PCB_SPECIAL, layerColor, PCB_BACKGROUND } from './pcbTheme.js';
+import { PCB_PAINT_ORDER, PCB_SPECIAL, layerColor, PCB_GRID } from './pcbTheme.js';
 import { layoutText, measureText } from '@ziroeda/common/src/font/stroke_font.js';
 
 const MM = 10000; // IU per mm, matches core units
@@ -677,6 +677,113 @@ export function drawDrawingSheet(ctx: CanvasRenderingContext2D, info: SheetInfo)
   sheetText(ctx, tb?.company ?? '', rx(109), ry(20), t15, 'left', true);
 }
 
+// ----- grid (GAL DrawGrid) ---------------------------------------------------
+
+/** Grid render options — the GAL DOTS grid with KiCad's pcbnew defaults. */
+export interface PcbGridOptions {
+  /** Grid spacing in IU (world units). pcbnew default grid = 0.5 mm. */
+  size: number;
+  /** Grid origin in IU (GAL m_gridOrigin; board grid origin). */
+  origin: Vec2;
+  /** Coarse-grid multiple: every `tick`th dot is doubled (SetCoarseGrid(10)). */
+  tick: number;
+  /** Minimum on-screen dot spacing in device px (m_gridMinSpacing = 10). */
+  minSpacing: number;
+  /** LAYER_GRID color. */
+  color: string;
+}
+
+export const DEFAULT_GRID_OPTIONS: PcbGridOptions = {
+  size: 0.5 * MM,
+  origin: { x: 0, y: 0 },
+  tick: 10,
+  minSpacing: 10,
+  color: PCB_GRID,
+};
+
+/**
+ * Paint the dotted grid the way GAL does (CAIRO_GAL_BASE::DrawGrid, DOTS
+ * branch): a dot at every grid node in device space, every `tick`th row/column
+ * doubled in size, with the spacing scaled up by whole `tick`s until it clears
+ * the minimum on-screen spacing so a zoomed-out board isn't a solid wall of
+ * dots. Drawn on the live canvas (identity transform) so it stays crisp every
+ * frame like GAL's NONCACHED grid target, behind the board raster. `dpr` is the
+ * device-pixel ratio (GAL's scaleFactor).
+ */
+export function drawGrid(
+  ctx: CanvasRenderingContext2D,
+  view: PcbViewTransform,
+  widthPx: number,
+  heightPx: number,
+  dpr: number,
+  opts: PcbGridOptions = DEFAULT_GRID_OPTIONS,
+): void {
+  if (opts.size <= 0 || view.scale <= 0) return;
+  const worldScale = view.scale; // device px per IU
+  // GAL: m_gridLineWidth = scaleFactor * 0.5 + 0.25; a normal dot is this wide,
+  // a coarse dot twice that, each clamped to a minimum of 1 device px.
+  const lineW = dpr * 0.5 + 0.25;
+
+  // Visible world rectangle (screen corners → world).
+  const wsx = (0 - view.tx) / worldScale;
+  const wsy = (0 - view.ty) / worldScale;
+  const wex = (widthPx - view.tx) / worldScale;
+  const wey = (heightPx - view.ty) / worldScale;
+
+  // Scale spacing up by whole ticks until it clears the min screen spacing.
+  const threshold = Math.round(opts.minSpacing / worldScale); // IU
+  let step = opts.size;
+  while (step <= threshold) step *= opts.tick;
+
+  const ox = opts.origin.x;
+  const oy = opts.origin.y;
+  let startX = Math.round((wsx - ox) / step);
+  let endX = Math.round((wex - ox) / step);
+  let startY = Math.round((wsy - oy) / step);
+  let endY = Math.round((wey - oy) / step);
+  if (startX > endX) [startX, endX] = [endX, startX];
+  if (startY > endY) [startY, endY] = [endY, startY];
+  startX--;
+  endX++;
+  startY--;
+  endY++;
+
+  // Guard against pathological counts (e.g. a not-yet-sized view).
+  if (endX - startX > 4000 || endY - startY > 4000) return;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = opts.color;
+  // Group dots by device size so the whole grid paints in a few fills.
+  const paths = new Map<string, Path2D>();
+  const rectAt = (dx: number, dy: number, sw: number, sh: number): void => {
+    const key = `${sw}:${sh}`;
+    let p = paths.get(key);
+    if (!p) {
+      p = new Path2D();
+      paths.set(key, p);
+    }
+    // Cairo drawGridPoint: round the centre, then offset by floor(size/2)+0.5.
+    p.rect(
+      Math.round(dx) - Math.floor(sw / 2) - 0.5,
+      Math.round(dy) - Math.floor(sh / 2) - 0.5,
+      sw,
+      sh,
+    );
+  };
+  for (let j = startY; j <= endY; j++) {
+    const tickY = j % opts.tick === 0;
+    const dy = (j * step + oy) * worldScale + view.ty;
+    const sh = Math.max(1, tickY ? lineW * 2 : lineW);
+    for (let i = startX; i <= endX; i++) {
+      const tickX = i % opts.tick === 0;
+      const dx = (i * step + ox) * worldScale + view.tx;
+      const sw = Math.max(1, tickX ? lineW * 2 : lineW);
+      rectAt(dx, dy, sw, sh);
+    }
+  }
+  for (const p of paths.values()) ctx.fill(p);
+}
+
 /**
  * The paint sequence as resumable steps, one per stacking pass. The editor
  * runs these across animation frames with a time budget so a 20k-track board
@@ -698,10 +805,9 @@ export function buildDrawSteps(
   const steps: (() => void)[] = [];
   steps.push(() => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (!overlay) {
-      ctx.fillStyle = PCB_BACKGROUND;
-      ctx.fillRect(0, 0, widthPx, heightPx);
-    }
+    // The raster is kept transparent so the grid (painted on the live canvas
+    // behind the raster, like GAL's GRID_DEPTH) shows through the empty board
+    // areas. The visible canvas fills PCB_BACKGROUND before blitting.
     ctx.setTransform(view.scale, 0, 0, view.scale, view.tx, view.ty);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';

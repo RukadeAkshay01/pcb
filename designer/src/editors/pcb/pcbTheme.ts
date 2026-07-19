@@ -10,6 +10,9 @@
  */
 
 export const PCB_BACKGROUND = 'rgb(0,16,35)';
+// LAYER_GRID / LAYER_GRID_AXES from the KiCad Default theme (builtin_color_themes.h).
+export const PCB_GRID = 'rgb(132,132,132)';
+export const PCB_GRID_AXES = 'rgb(194,194,194)';
 
 const rgba = (r: number, g: number, b: number, a = 1): string =>
   a >= 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${a})`;

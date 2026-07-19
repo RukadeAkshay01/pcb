@@ -31,6 +31,8 @@ import {
   buildScene,
   buildDrawSteps,
   drawBoard,
+  drawGrid,
+  DEFAULT_GRID_OPTIONS,
   DEFAULT_DRAW_OPTIONS,
   type BoardScene,
   type PcbDrawOptions,
@@ -388,6 +390,12 @@ export function PcbEditor({
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = 'rgb(0,16,35)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Grid sits behind the board (GAL GRID_DEPTH), painted crisply at the live
+    // view every frame so it stays sharp during pan/zoom. The raster is drawn on
+    // top with a transparent background so the grid shows through empty areas.
+    if (objects.grid && toggles.has('toggleGrid')) {
+      drawGrid(ctx, v, canvas.width, canvas.height, dpr, DEFAULT_GRID_OPTIONS);
+    }
     const c = cacheRef.current;
     if (c) {
       const k = v.scale / c.view.scale;

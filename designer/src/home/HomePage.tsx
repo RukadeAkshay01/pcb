@@ -33,7 +33,6 @@ import {
   treeIconFor,
   isHiddenFile,
   inArchiveAllowList,
-  isRootFileName,
   basename,
   fmtBytes,
   fmtWhen,
@@ -573,6 +572,23 @@ export function HomePage({
     [proFile, picked],
   );
   const projLower = projName.toLowerCase();
+  // KiCad's getProjects(dir): the basenames of every .kicad_pro in the folder.
+  // A folder may hold several projects (e.g. the ecc83 demo's ecc83-pp and
+  // ecc83-pp_v2); the tree shows the root sheet of each, so this set — not just
+  // the active project — decides which .kicad_sch are visible (subsheets hide).
+  const projectNames = useMemo<ReadonlySet<string>>(
+    () =>
+      new Set(
+        (picked ?? [])
+          .filter((f) => /\.kicad_pro$/i.test(f.name))
+          .map((f) =>
+            basename(f.name)
+              .replace(/\.kicad_pro$/i, '')
+              .toLowerCase(),
+          ),
+      ),
+    [picked],
+  );
   // KiCad's tree root shows the full .kicad_pro filename (m_root = fn.GetFullName()).
   const rootLabel = proFile
     ? basename(proFile.name)
@@ -813,7 +829,7 @@ export function HomePage({
           picked={picked}
           dirRoot={dirRoot}
           rootLabel={rootLabel}
-          projLower={projLower}
+          projectNames={projectNames}
           width={panelWidth}
           expanded={expanded}
           onToggleDir={toggleDir}
