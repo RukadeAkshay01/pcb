@@ -141,25 +141,39 @@ export function App(): JSX.Element {
     }, 1200);
   }, []);
 
-  // Drawing Sheet Editor → Save to Project: write the .kicad_wks into the open
-  // project (IndexedDB/cloud) and offer it as a schematic drawing-sheet choice.
-  const onSaveToProject = useCallback((fileName: string, text: string) => {
+  // Persist project files to IndexedDB/cloud immediately (no autosave debounce),
+  // used for discrete actions — drawing-sheet reference changes and Save to
+  // Project — so a "go back and reopen" reads them straight back.
+  const persistFilesNow = useCallback((files: PickedFile[]) => {
     const cur = projectFilesRef.current;
-    if (!cur) return;
-    setSessionSheets((prev) => [
-      ...prev.filter((f) => f.name !== fileName),
-      { name: fileName, text },
-    ]);
-    if (!storageAvailable()) return;
+    if (!cur || files.length === 0 || !storageAvailable()) return;
     void (async () => {
       try {
         const rec = (await listProjects()).find((p) => p.name === projectNameOf(cur));
-        if (rec) await updateProjectFiles(rec.id, [{ name: fileName, bytes: enc.encode(text) }]);
+        if (rec)
+          await updateProjectFiles(
+            rec.id,
+            files.map((f) => ({ name: f.name, bytes: enc.encode(f.text) })),
+          );
       } catch {
         /* storage disabled */
       }
     })();
   }, []);
+
+  // Drawing Sheet Editor → Save (Save As): write the .kicad_wks into the open
+  // project and offer it as a schematic drawing-sheet choice + in the file tree.
+  const onSaveToProject = useCallback(
+    (fileName: string, text: string) => {
+      if (!projectFilesRef.current) return;
+      setSessionSheets((prev) => [
+        ...prev.filter((f) => f.name !== fileName),
+        { name: fileName, text },
+      ]);
+      persistFilesNow([{ name: fileName, text }]);
+    },
+    [persistFilesNow],
+  );
 
   const pcbFile = useMemo<PickedFile | null>(
     () => standalonePcb ?? projectFiles?.find((f) => /\.kicad_pcb$/i.test(f.name)) ?? null,
@@ -230,8 +244,13 @@ export function App(): JSX.Element {
   }
 
   if (view === 'home') {
-    // Keep the open project visible in the manager tree on return from an editor.
-    const openFiles = projectFiles ?? (standalonePcb ? [standalonePcb] : null);
+    // Keep the open project visible in the manager tree on return from an editor,
+    // including any .kicad_wks saved into it this session (not yet in projectFiles).
+    const base = projectFiles ?? (standalonePcb ? [standalonePcb] : null);
+    const openFiles =
+      base && sessionSheets.length
+        ? [...base, ...sessionSheets.filter((s) => !base.some((f) => f.name === s.name))]
+        : base;
     return (
       <HomePage
         initialFiles={openFiles}
@@ -308,6 +327,7 @@ export function App(): JSX.Element {
             initialFile={startFile}
             placeRequest={placeRequest}
             onProjectChange={onProjectChange}
+            onPersistFiles={persistFilesNow}
             extraSheetFiles={sessionSheets}
             projectName={projectName}
           />

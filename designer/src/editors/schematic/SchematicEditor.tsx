@@ -199,6 +199,7 @@ export function SchematicEditor({
   initialFile,
   placeRequest,
   onProjectChange,
+  onPersistFiles,
   extraSheetFiles,
   projectName,
 }: {
@@ -216,6 +217,9 @@ export function SchematicEditor({
   placeRequest?: { lib: LibSymbol; nonce: number } | null;
   /** Autosave hook: called (debounced) with the serialized sheets after edits. */
   onProjectChange?: (files: PickedFile[]) => void;
+  /** Persist project files immediately (no debounce) — used for the drawing-sheet
+   *  reference in .kicad_pro so it survives a "go back and reopen". */
+  onPersistFiles?: (files: PickedFile[]) => void;
   /** `.kicad_wks` saved into the project this session (Drawing Sheet Editor →
    *  Save to Project), offered as extra Page Settings drawing-sheet choices. */
   extraSheetFiles?: PickedFile[];
@@ -676,7 +680,9 @@ export function SchematicEditor({
         const updated = writeSheetRefText(pro.text, sheetName);
         if (updated === null || updated === pro.text) return prev;
         const changed = { name: pro.name, text: updated };
-        onProjectChange?.([changed]);
+        // Persist the reference now (not via the debounced autosave) so a
+        // reopen straight after picking the sheet reads it back.
+        onPersistFiles?.([changed]);
         return prev.map((f) => (f.name === pro.name ? changed : f));
       });
       const anyExport =
@@ -716,7 +722,7 @@ export function SchematicEditor({
       }
       setPageSettingsOpen(false);
     },
-    [runCommand, currentFile, onProjectChange],
+    [runCommand, currentFile, onProjectChange, onPersistFiles],
   );
 
   // A base file name for a printed/plotted output (KiCad names plots after the
