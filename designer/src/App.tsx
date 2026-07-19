@@ -177,11 +177,20 @@ export function App(): JSX.Element {
   const registerSchFlush = useCallback((fn: (() => void) | null) => {
     schFlush.current = fn;
   }, []);
+  // Edits mirrored into the in-memory project so the home tree (and a reopen
+  // from it) reflect them — autosave only writes IndexedDB, which a tree reopen
+  // does not re-read. Cleared when a project is (re)opened.
+  const liveEdits = useRef<Map<string, string>>(new Map());
   const flushSaves = useCallback(() => {
     schFlush.current?.(); // push the editor's latest serialized sheets into the queue
     clearTimeout(saveTimer.current);
+    for (const [name, bytes] of pendingWrite.current)
+      liveEdits.current.set(name, dec.decode(bytes));
     writePending();
   }, [writePending]);
+  useEffect(() => {
+    liveEdits.current.clear();
+  }, [projectFiles]);
 
   // Persist project files to IndexedDB/cloud immediately (no autosave debounce),
   // used for discrete actions — drawing-sheet reference changes and Save to
@@ -292,7 +301,16 @@ export function App(): JSX.Element {
   if (view === 'home') {
     // Keep the open project visible in the manager tree on return from an editor,
     // including any .kicad_wks saved into it this session (not yet in projectFiles).
-    const base = projectFiles ?? (standalonePcb ? [standalonePcb] : null);
+    // Overlay flushed edits (liveEdits) so a reopen from the tree sees them, and
+    // append any .kicad_wks saved into the project this session.
+    const edited = projectFiles
+      ? projectFiles.map((f) =>
+          liveEdits.current.has(f.name)
+            ? { name: f.name, text: liveEdits.current.get(f.name)! }
+            : f,
+        )
+      : null;
+    const base = edited ?? (standalonePcb ? [standalonePcb] : null);
     const openFiles =
       base && sessionSheets.length
         ? [...base, ...sessionSheets.filter((s) => !base.some((f) => f.name === s.name))]

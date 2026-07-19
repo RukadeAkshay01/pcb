@@ -17,6 +17,7 @@ import {
   boardItemBBox,
   parseBoardItemId,
   moveBoardItems,
+  subsetBoardItems,
   deleteBoardItems,
   rotateBoardItems,
   duplicateBoardItems,
@@ -29,6 +30,7 @@ import { Toolbar } from '../../ui/Toolbar.js';
 import {
   buildScene,
   buildDrawSteps,
+  drawBoard,
   DEFAULT_DRAW_OPTIONS,
   type BoardScene,
   type PcbDrawOptions,
@@ -219,6 +221,10 @@ export function PcbEditor({
   // a move gesture is in flight; committed on pointer-up (PCB_MOVE_TOOL preview).
   const moveDeltaRef = useRef<{ x: number; y: number } | null>(null);
   const movingRef = useRef(false);
+  // While a move is in flight the base raster is the board with the moving items
+  // removed; this scene holds just those items, painted live at the drag offset
+  // so the real geometry follows the cursor (not merely its bounding box).
+  const moveSceneRef = useRef<BoardScene | null>(null);
   // Whole-board snapshot undo/redo (EDIT_TOOL's SaveCopyInUndoList).
   const undoRef = useRef<Board[]>([]);
   const redoRef = useRef<Board[]>([]);
@@ -393,6 +399,35 @@ export function PcbEditor({
       ctx.drawImage(c.canvas, 0, 0);
       ctx.imageSmoothingEnabled = true;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    // Live move preview: the dragged items' actual geometry, painted on top of
+    // the static backdrop at the current drag offset so the symbol itself
+    // follows the cursor in real time (EDIT_TOOL::Move's GAL overlay), instead
+    // of only its bounding box moving until the drop.
+    {
+      const ms = moveSceneRef.current;
+      const md = moveDeltaRef.current;
+      if (ms) {
+        const offView = {
+          scale: v.scale,
+          tx: v.tx + (md ? md.x : 0) * v.scale,
+          ty: v.ty + (md ? md.y : 0) * v.scale,
+        };
+        ctx.save();
+        drawBoard(
+          ctx,
+          ms,
+          offView,
+          visible,
+          canvas.width,
+          canvas.height,
+          drawOpts,
+          undefined,
+          true,
+        );
+        ctx.restore();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
     }
     // Selection highlight: dashed boxes around selected items (drawn on top of
     // the raster in device-pixel space, like the footprint editor's overlay).
@@ -809,10 +844,27 @@ export function PcbEditor({
         if (!cur) return;
         if (d.onItem) {
           // Drag on an item = move it (PCB_MOVE_TOOL). On the first move, make
-          // sure the grabbed item is selected so the whole selection follows.
+          // sure the grabbed item is selected so the whole selection follows,
+          // then split the scene into a static backdrop (everything else) and a
+          // live overlay of the moving items so the real geometry — not just a
+          // bounding box — tracks the cursor.
           if (!movingRef.current) {
             movingRef.current = true;
-            if (d.hitId && !selForDrawRef.current.has(d.hitId)) applySelect(d.hitId, false);
+            let movingSel: ReadonlySet<string> = selForDrawRef.current;
+            if (d.hitId && !movingSel.has(d.hitId)) {
+              movingSel = new Set([d.hitId]);
+              applySelect(d.hitId, false);
+            }
+            const brd = boardRef.current;
+            if (brd && movingSel.size > 0) {
+              const filter = {
+                hideFrontFootprints: !objects.footprintsFront,
+                hideBackFootprints: !objects.footprintsBack,
+              };
+              sceneRef.current = buildScene(deleteBoardItems(brd, movingSel), filter);
+              moveSceneRef.current = buildScene(subsetBoardItems(brd, movingSel), filter);
+              cacheRef.current = null;
+            }
           }
           moveDeltaRef.current = { x: cur.x - d.world.x, y: cur.y - d.world.y };
           requestDraw();
@@ -834,12 +886,19 @@ export function PcbEditor({
     boxRef.current = null;
     movingRef.current = false;
     moveDeltaRef.current = null;
+    const hadMoveOverlay = moveSceneRef.current !== null;
+    moveSceneRef.current = null;
     if (d) {
       if (!d.moved) {
         clickSelect(e.clientX, e.clientY, d.shift);
       } else if (moved && delta && boardRef.current && (delta.x !== 0 || delta.y !== 0)) {
-        // Commit the drag-move of the current selection (EDIT_TOOL::Move).
+        // Commit the drag-move of the current selection (EDIT_TOOL::Move); this
+        // rebuilds the full scene, replacing the split backdrop/overlay.
         commitBoard(moveBoardItems(boardRef.current, selForDrawRef.current, delta));
+      } else if (hadMoveOverlay && boardRef.current) {
+        // Move started but dropped in place (zero net delta): the backdrop is
+        // still the board-minus-moving-items, so restore the full scene.
+        rebuildScene(boardRef.current);
       } else if (box && boardRef.current) {
         // Left→right = window (contained); right→left = crossing (touching).
         const contained = box.b.x >= box.a.x;

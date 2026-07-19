@@ -691,17 +691,22 @@ export function buildDrawSteps(
   heightPx: number,
   opts: PcbDrawOptions = DEFAULT_DRAW_OPTIONS,
   sheet?: SheetInfo,
+  // Overlay pass (live move preview): paint the items on top of an existing
+  // frame, so skip the background clear and the drawing sheet.
+  overlay = false,
 ): (() => void)[] {
   const steps: (() => void)[] = [];
   steps.push(() => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = PCB_BACKGROUND;
-    ctx.fillRect(0, 0, widthPx, heightPx);
+    if (!overlay) {
+      ctx.fillStyle = PCB_BACKGROUND;
+      ctx.fillRect(0, 0, widthPx, heightPx);
+    }
     ctx.setTransform(view.scale, 0, 0, view.scale, view.tx, view.ty);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     // Drawing sheet (page frame + title block) behind the board, like pcbnew.
-    if (sheet && opts.drawingSheet) drawDrawingSheet(ctx, sheet);
+    if (!overlay && sheet && opts.drawingSheet) drawDrawingSheet(ctx, sheet);
   });
 
   const minPen = view.scale > 0 ? 1 / view.scale : 0; // 1 device px in IU
@@ -799,8 +804,21 @@ export function drawBoard(
   widthPx: number,
   heightPx: number,
   opts: PcbDrawOptions = DEFAULT_DRAW_OPTIONS,
+  sheet?: SheetInfo,
+  overlay = false,
 ): void {
-  for (const step of buildDrawSteps(ctx, scene, view, visible, widthPx, heightPx, opts)) step();
+  for (const step of buildDrawSteps(
+    ctx,
+    scene,
+    view,
+    visible,
+    widthPx,
+    heightPx,
+    opts,
+    sheet,
+    overlay,
+  ))
+    step();
 }
 
 export { measureText };
