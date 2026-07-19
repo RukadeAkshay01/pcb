@@ -203,6 +203,7 @@ export function SchematicEditor({
   registerAutosaveFlush,
   extraSheetFiles,
   projectName,
+  rootPro,
 }: {
   onExitToHome: () => void;
   onShowPcb?: () => void;
@@ -229,6 +230,10 @@ export function SchematicEditor({
   extraSheetFiles?: PickedFile[];
   /** Project name shown as "<project> — Schematic Editor" in the menu bar. */
   projectName?: string;
+  /** Basename of the active project's .kicad_pro (no extension). When a folder
+   *  holds several projects, this pins which one's root sheet to load, so the
+   *  editor matches the launcher tree instead of guessing the first/last pro. */
+  rootPro?: string;
 }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const initial = useMemo<Schematic | null>(() => {
@@ -858,6 +863,10 @@ export function SchematicEditor({
         const docs = new Map<string, Schematic>();
         const problems: string[] = [];
         let proName: string | undefined;
+        // When a folder bundles several projects, the launcher pins the active
+        // one via rootPro; load that project's .kicad_pro so the editor's root
+        // sheet matches the tree instead of guessing the first pro found.
+        const wantPro = rootPro ? `${rootPro}.kicad_pro`.toLowerCase() : null;
         // Parse sheet by sheet with a per-sheet gauge (KiCad's "Loading
         // Schematic" progress dialog), yielding a paint between sheets so the
         // bar advances even though each parse is synchronous.
@@ -868,11 +877,13 @@ export function SchematicEditor({
         for (const f of files) {
           const base = f.name.split('/').pop()!.split('\\').pop()!;
           if (/\.kicad_pro$/i.test(base)) {
-            // The FIRST .kicad_pro is the project's (matching projectNameOf and
-            // the tree's root); a folder may bundle more than one project, and
-            // picking a later one would open a different root than the tree
-            // shows — the two would then edit different sheets and diverge.
-            proName ??= base;
+            // Prefer the active project's .kicad_pro (rootPro) so the editor and
+            // the launcher tree open the same root sheet. Absent that, fall back
+            // to the FIRST .kicad_pro (matching projectNameOf and the tree root);
+            // picking a later one would open a different root than the tree shows
+            // and the two would then edit different sheets and diverge.
+            if (wantPro && base.toLowerCase() === wantPro) proName = base;
+            else proName ??= base;
             continue;
           }
           if (!/\.kicad_sch$/i.test(base)) continue;
@@ -918,7 +929,7 @@ export function SchematicEditor({
         setLoading(null);
       }
     },
-    [resetTransient],
+    [resetTransient, rootPro],
   );
 
   // A project handed over from the home page's Open Project picker.
@@ -929,8 +940,10 @@ export function SchematicEditor({
     // drop any in-session sheet override for the freshly opened project.
     setRawFiles(initialProject ?? []);
     setSheetOverride(null);
+    // rootPro is a dep so switching the active project (same folder, different
+    // .kicad_pro) reloads with the newly-pinned root sheet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialProject]);
+  }, [initialProject, rootPro]);
 
   // Serialize the project's sheets (current sheet + resident others) for autosave.
   const serializeSheets = useCallback((): PickedFile[] => {

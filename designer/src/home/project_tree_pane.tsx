@@ -57,6 +57,7 @@ export function ProjectTreePane({
   onOpenSymbolFile,
   onOpenFootprintFile,
   onOpenDrawingSheetFile,
+  onSwitchProject,
   onOpenProjectPicker,
   onSelectFiles,
 }: {
@@ -81,14 +82,23 @@ export function ProjectTreePane({
   onOpenSymbolFile?: (file: PickedHomeFile) => void;
   onOpenFootprintFile?: (file: PickedHomeFile) => void;
   onOpenDrawingSheetFile?: (file: PickedHomeFile) => void;
+  /** Switch to another project (double-clicking its .kicad_pro in the tree). */
+  onSwitchProject?: (proFullName: string) => void;
   onOpenProjectPicker: () => void;
   onSelectFiles: () => void;
 }): JSX.Element {
   // Like KiCad's addItemToProjectTree: a schematic is only listed when its
-  // basename matches the project (i.e. the root sheet). Sub-sheets are hidden
-  // here — they live in the Schematic Editor's hierarchy navigator.
-  const isHiddenNode = (name: string): boolean =>
-    isHiddenFile(name) || (/\.kicad_sch$/i.test(name) && !isRootFileName(name, projLower));
+  // basename matches the active project (i.e. the root sheet). Sub-sheets and
+  // other projects' sheets are hidden here — they live in the editor's
+  // hierarchy navigator, or appear when that project is made active.
+  // A folder may hold several projects: the active project's .kicad_pro is the
+  // root row (hidden as a child); the other .kicad_pro files stay visible so
+  // they can be double-clicked to switch project.
+  const isHiddenNode = (name: string): boolean => {
+    const base = name.split(/[\\/]/).pop() ?? name;
+    if (/\.kicad_pro$/i.test(base)) return base === rootLabel;
+    return isHiddenFile(name) || (/\.kicad_sch$/i.test(name) && !isRootFileName(name, projLower));
+  };
 
   // Right-click context menu (upstream popup, web-applicable subset).
   const [menu, setMenu] = useState<{ x: number; y: number; paths: Set<string> } | null>(null);
@@ -139,6 +149,7 @@ export function ProjectTreePane({
     const isSym = /\.kicad_sym$/i.test(node.name);
     const isMod = /\.kicad_mod$/i.test(node.name);
     const isWks = /\.kicad_wks$/i.test(node.name);
+    const isPro = /\.kicad_pro$/i.test(node.name);
     // PROJECT_TREE_ITEM::Activate: each document type routes to the editor it
     // belongs to (a .kicad_mod to the Footprint Editor, a .kicad_sym to the
     // Symbol Editor, a board to the PCB Editor, a sheet to the Schematic Editor,
@@ -154,7 +165,9 @@ export function ProjectTreePane({
               ? () => onOpenFootprintFile(node.file!)
               : isWks && onOpenDrawingSheetFile && node.file
                 ? () => onOpenDrawingSheetFile(node.file!)
-                : undefined;
+                : isPro && onSwitchProject && node.file
+                  ? () => onSwitchProject(node.file!.name)
+                  : undefined;
     const openTitle = isPcb
       ? 'Double-click to open in the PCB Editor'
       : isSch
@@ -165,7 +178,9 @@ export function ProjectTreePane({
             ? 'Double-click to open in the Footprint Editor'
             : isWks
               ? 'Double-click to open in the Drawing Sheet Editor'
-              : node.path;
+              : isPro
+                ? 'Double-click to switch to this project'
+                : node.path;
     // KiCad's project tree: single click selects, double click opens the file.
     return (
       <div

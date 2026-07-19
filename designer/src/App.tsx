@@ -32,6 +32,15 @@ const projectNameOf = (files: PickedFile[]): string => {
 
 const pcbBasename = (p: string): string => p.split('/').pop()!.split('\\').pop()!;
 
+// A project's basename (no extension), e.g. "proj/proj.kicad_pro" → "proj".
+const projBaseOf = (proName: string): string => pcbBasename(proName).replace(/\.kicad_pro$/i, '');
+
+// Does `fileName` belong to the project whose basename is `base`? KiCad's per-
+// project files share the exact basename (proj.kicad_sch / proj.kicad_pcb), so
+// the file basename starts with "base." — this keeps "proj" and "proj_v2" apart.
+const inProject = (fileName: string, base: string): boolean =>
+  pcbBasename(fileName).toLowerCase().startsWith(`${base.toLowerCase()}.`);
+
 // The project's folder prefix (e.g. "proj/"), taken from the .kicad_pro's own
 // directory, or '' when it sits at the root. New files added to the project
 // carry this prefix so they land in the project folder like the other files.
@@ -65,6 +74,10 @@ export function App(): JSX.Element {
   // reload/reset the mounted editors; offered as schematic Page Settings choices.
   const [sessionSheets, setSessionSheets] = useState<PickedFile[]>([]);
   const [startFile, setStartFile] = useState<string | null>(null);
+  // The active project's .kicad_pro (full name) when a folder holds more than
+  // one project (KiCad's active project). null → the first .kicad_pro. Double-
+  // clicking another .kicad_pro switches it, re-scoping every editor's root.
+  const [activePro, setActivePro] = useState<string | null>(null);
   // A board opened directly (no schematic project around it).
   const [standalonePcb, setStandalonePcb] = useState<PickedFile | null>(null);
   const [schMounted, setSchMounted] = useState(false);
@@ -227,16 +240,29 @@ export function App(): JSX.Element {
     [persistFilesNow],
   );
 
-  const pcbFile = useMemo<PickedFile | null>(
-    () => standalonePcb ?? projectFiles?.find((f) => /\.kicad_pcb$/i.test(f.name)) ?? null,
-    [projectFiles, standalonePcb],
-  );
+  // The active project's .kicad_pro (full name), validated against the open
+  // files; defaults to the first .kicad_pro. `activeBase` scopes every editor.
+  const activeProName = useMemo(() => {
+    if (!projectFiles) return null;
+    const pros = projectFiles.filter((f) => /\.kicad_pro$/i.test(f.name)).map((f) => f.name);
+    return (activePro && pros.includes(activePro) ? activePro : pros[0]) ?? null;
+  }, [projectFiles, activePro]);
+  const activeBase = activeProName ? projBaseOf(activeProName) : '';
+
+  const pcbFile = useMemo<PickedFile | null>(() => {
+    if (standalonePcb) return standalonePcb;
+    if (!projectFiles) return null;
+    const boards = projectFiles.filter((f) => /\.kicad_pcb$/i.test(f.name));
+    // The active project's board, else any board (single-project projects).
+    return boards.find((f) => activeBase && inProject(f.name, activeBase)) ?? boards[0] ?? null;
+  }, [projectFiles, standalonePcb, activeBase]);
   const hasSchematic = useMemo(
     () => !!projectFiles?.some((f) => /\.kicad_sch$/i.test(f.name)),
     [projectFiles],
   );
-  // KiCad shows "<project> — <Editor>" in the window title; we put it in the menu bar.
-  const projectName = useMemo(
+  // The folder's identity (first .kicad_pro) — stable across in-folder project
+  // switches, so it keys the "new project opened" reset without self-firing.
+  const folderName = useMemo(
     () =>
       projectFiles
         ? projectNameOf(projectFiles)
@@ -245,11 +271,25 @@ export function App(): JSX.Element {
           : '',
     [projectFiles, standalonePcb],
   );
+  // KiCad shows "<project> — <Editor>" in the window title; we put it in the
+  // menu bar. With several projects in a folder, it names the active one.
+  const projectName = activeBase || folderName;
 
-  // A different project drops any drawing sheets saved into the previous one.
+  // A different project folder drops any drawing sheets saved into the previous
+  // one, and resets the active project to its default (first .kicad_pro).
   useEffect(() => {
     setSessionSheets([]);
-  }, [projectName]);
+    setActivePro(null);
+  }, [folderName]);
+
+  // Switch the active project (double-clicking another .kicad_pro in the tree):
+  // re-scope every editor to that project's root and open its schematic.
+  const switchProject = useCallback((proFullName: string) => {
+    setActivePro(proFullName);
+    setStartFile(projBaseOf(proFullName) + '.kicad_sch');
+    setSchMounted(true);
+    setView('schematic');
+  }, []);
 
   const goHome = useCallback(() => {
     flushSaves(); // persist pending edits before the tree/reopen can read them
@@ -318,6 +358,8 @@ export function App(): JSX.Element {
     return (
       <HomePage
         initialFiles={openFiles}
+        activePro={activeProName ?? undefined}
+        onSwitchProject={switchProject}
         onOpenSchematic={() => {
           setProjectFiles(null);
           setStandalonePcb(null);
@@ -395,6 +437,7 @@ export function App(): JSX.Element {
             onShowCalculator={showCalculator}
             initialProject={projectFiles}
             initialFile={startFile}
+            rootPro={activeBase || undefined}
             placeRequest={placeRequest}
             onProjectChange={onProjectChange}
             onPersistFiles={persistFilesNow}
