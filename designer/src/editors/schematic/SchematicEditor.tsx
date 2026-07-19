@@ -1,5 +1,5 @@
 import type { Vec2 } from '@ziroeda/kimath';
-import { iuToMM, mmToIU } from '@ziroeda/common';
+import { iuToMM, mmToIU, type WksSheet } from '@ziroeda/common';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { parse } from '@ziroeda/sexpr';
 import {
@@ -586,6 +586,10 @@ export function SchematicEditor({
   // Page Settings (DIALOG_PAGES_SETTINGS), Print (DIALOG_PRINT) and Plot
   // (DIALOG_PLOT_SCHEMATIC) dialogs — open flags.
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
+  // Custom drawing sheet (a loaded `.kicad_wks`), or null for the built-in
+  // default. KiCad keeps this as the project's m_DrawingSheetFileName.
+  const [drawingSheet, setDrawingSheet] = useState<WksSheet | null>(null);
+  const [drawingSheetName, setDrawingSheetName] = useState('');
   const [printOpen, setPrintOpen] = useState(false);
   const [plotOpen, setPlotOpen] = useState(false);
   // Paste Special (DIALOG_PASTE_SPECIAL): pick the PASTE_MODE before pasting.
@@ -623,8 +627,11 @@ export function SchematicEditor({
   // are copied into every other sheet file (upstream's OnOkClick loop), via
   // the same cross-document pattern as the bulk field edits.
   const applyPageSettings = useCallback(
-    (next: PageSettings, exports: PageExportFlags) => {
+    (next: PageSettings, exports: PageExportFlags, sheet: WksSheet | null, sheetName: string) => {
       runCommand(setPageSettingsCommand(next));
+      // Adopt the chosen drawing sheet (null = built-in default stationery).
+      setDrawingSheet(sheet);
+      setDrawingSheetName(sheetName);
       const anyExport =
         exports.paper ||
         exports.date ||
@@ -679,10 +686,11 @@ export function SchematicEditor({
     (opts: PlotOpts, themeId?: string) => {
       const printTheme =
         themeId && BUILTIN_THEMES[themeId] ? BUILTIN_THEMES[themeId]!.theme : theme;
-      if (doc) printSheet(doc, printTheme, opts, outputBaseName());
+      const o = drawingSheet ? { ...opts, sheet: drawingSheet } : opts;
+      if (doc) printSheet(doc, printTheme, o, outputBaseName());
       setPrintOpen(false);
     },
-    [doc, theme, outputBaseName],
+    [doc, theme, outputBaseName, drawingSheet],
   );
 
   // Bulk Edit Symbol Fields: apply the changed cells per sheet — the current
@@ -721,10 +729,11 @@ export function SchematicEditor({
   const doPlot = useCallback(
     (format: PlotFormat, opts: PlotOpts, allPages: boolean, themeId?: string) => {
       const plotTheme = themeId && BUILTIN_THEMES[themeId] ? BUILTIN_THEMES[themeId]!.theme : theme;
+      const o = drawingSheet ? { ...opts, sheet: drawingSheet } : opts;
       const one = (d: Schematic, name: string): void => {
-        if (format === 'svg') plotSvg(d, plotTheme, opts, name);
-        else if (format === 'png') void plotPng(d, plotTheme, opts, name);
-        else void plotPdf(d, plotTheme, opts, name);
+        if (format === 'svg') plotSvg(d, plotTheme, o, name);
+        else if (format === 'png') void plotPng(d, plotTheme, o, name);
+        else void plotPdf(d, plotTheme, o, name);
       };
       if (allPages) {
         for (const [file, d] of liveDocs())
@@ -732,7 +741,7 @@ export function SchematicEditor({
       } else if (doc) one(doc, outputBaseName());
       setPlotOpen(false);
     },
-    [doc, theme, outputBaseName, liveDocs],
+    [doc, theme, outputBaseName, liveDocs, drawingSheet],
   );
   useEffect(() => {
     // Changed search settings restart the scan (upstream m_foundItemHighlight reset).
@@ -1250,6 +1259,7 @@ export function SchematicEditor({
       showHiddenPins: es.appearance.show_hidden_pins,
       showHiddenFields: es.appearance.show_hidden_fields,
       showPageLimits: es.appearance.show_page_limits,
+      ...(drawingSheet ? { drawingSheet } : {}),
       // Default pen for zero-width strokes = Schematic Setup > Formatting's
       // "Default line width" (SCHEMATIC_SETTINGS::m_DefaultLineWidth), mils→IU.
       defaultPenIU: mmToIU((setup.formatting.defaultLineWidthMils * 25.4) / 1000),
@@ -1278,7 +1288,7 @@ export function SchematicEditor({
         },
       },
     }),
-    [es],
+    [es, drawingSheet],
   );
 
   const inputPrefs = useMemo<InputPrefs>(
@@ -2328,6 +2338,8 @@ export function SchematicEditor({
               value={getPageSettings(doc)}
               sheetCount={flatSheets.length}
               sheetNumber={Number(pageNumberOf(currentPath)) || 1}
+              drawingSheet={drawingSheet}
+              drawingSheetName={drawingSheetName}
               onOk={applyPageSettings}
               onCancel={() => setPageSettingsOpen(false)}
             />

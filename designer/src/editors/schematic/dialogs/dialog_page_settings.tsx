@@ -10,7 +10,12 @@
 
 import { useState, useRef, useEffect, type JSX } from 'react';
 import type { PageSettings } from '@ziroeda/eeschema';
-import { defaultDrawingSheet, layoutDrawingSheet } from '@ziroeda/common';
+import {
+  defaultDrawingSheet,
+  layoutDrawingSheet,
+  parseDrawingSheet,
+  type WksSheet,
+} from '@ziroeda/common';
 import { PAPER_CHOICES, PAPER_MM } from '../../drawingsheet/PageSettingsDialog.js';
 import { drawDrawingSheetItems, DS_ITEM_COLOR } from '../../drawingsheet/wksRender.js';
 
@@ -36,7 +41,15 @@ interface Props {
   /** "Number of sheets: %d" / "Sheet number: %d" static texts. */
   sheetCount: number;
   sheetNumber: number;
-  onOk: (next: PageSettings, exports: PageExportFlags) => void;
+  /** Current custom drawing sheet (null = built-in default) and its file name. */
+  drawingSheet?: WksSheet | null;
+  drawingSheetName?: string;
+  onOk: (
+    next: PageSettings,
+    exports: PageExportFlags,
+    drawingSheet: WksSheet | null,
+    drawingSheetName: string,
+  ) => void;
   onCancel: () => void;
 }
 
@@ -70,6 +83,8 @@ export function DialogPageSettings({
   value,
   sheetCount,
   sheetNumber,
+  drawingSheet: drawingSheetProp = null,
+  drawingSheetName = '',
   onOk,
   onCancel,
 }: Props): JSX.Element {
@@ -96,6 +111,24 @@ export function DialogPageSettings({
     company: false,
     comments: Array(9).fill(false) as boolean[],
   });
+  // Drawing sheet: a loaded `.kicad_wks` (null = built-in default stationery),
+  // mirroring KiCad's project m_DrawingSheetFileName + the File picker/browse.
+  const [sheet, setSheet] = useState<WksSheet | null>(drawingSheetProp);
+  const [sheetName, setSheetName] = useState(drawingSheetName);
+  const [sheetError, setSheetError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load a picked `.kicad_wks`, the way DrawingSheetEditor.openFile parses one.
+  const loadSheetFile = async (file: File): Promise<void> => {
+    try {
+      const parsed = parseDrawingSheet(await file.text());
+      setSheet(parsed);
+      setSheetName(file.name);
+      setSheetError('');
+    } catch (err) {
+      setSheetError(`Couldn't read ${file.name}: ${(err as Error).message}`);
+    }
+  };
 
   const submit = (): void => {
     onOk(
@@ -108,6 +141,8 @@ export function DialogPageSettings({
         comments,
       },
       exports,
+      sheet,
+      sheetName,
     );
   };
 
@@ -144,7 +179,7 @@ export function DialogPageSettings({
     ctx.save();
     ctx.transform(scale, 0, 0, scale, 0, 0); // IU → CSS px
     const draws = layoutDrawingSheet(
-      defaultDrawingSheet(),
+      sheet ?? defaultDrawingSheet(),
       { widthMM: wMM, heightMM: hMM },
       {
         pageNumber: sheetNumber,
@@ -179,6 +214,7 @@ export function DialogPageSettings({
     customH,
     sheetNumber,
     sheetCount,
+    sheet,
   ]);
 
   const row: React.CSSProperties = {
@@ -323,13 +359,53 @@ export function DialogPageSettings({
             <div style={heading}>Drawing Sheet</div>
             <div style={row}>
               <span style={{ ...lab, width: 34 }}>File:</span>
+              {/* Pick a .kicad_wks to use as the drawing sheet; empty = the
+                  built-in default (KiCad's project m_DrawingSheetFileName). */}
               <input
                 className="ze-search"
                 style={{ flex: 1 }}
-                disabled
-                title="Custom drawing sheet files are not supported yet."
+                value={sheetName}
+                readOnly
+                placeholder="Default drawing sheet"
+                title={sheetName || 'Default drawing sheet'}
               />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".kicad_wks"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void loadSheetFile(f);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                className="ze-btn"
+                title="Browse for a .kicad_wks drawing sheet"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Browse…
+              </button>
+              {sheet && (
+                <button
+                  className="ze-btn"
+                  title="Use the built-in default drawing sheet"
+                  onClick={() => {
+                    setSheet(null);
+                    setSheetName('');
+                    setSheetError('');
+                  }}
+                >
+                  ✕
+                </button>
+              )}
             </div>
+            {sheetError && (
+              <div style={{ color: 'var(--danger, #d33)', fontSize: 11, margin: '0 0 4px 42px' }}>
+                {sheetError}
+              </div>
+            )}
             <div style={{ ...heading, marginTop: 10 }}>Title Block Parameters</div>
             <div style={{ display: 'flex', fontSize: 12, margin: '2px 0 6px' }}>
               <span>Number of sheets: {sheetCount}</span>
