@@ -314,36 +314,29 @@ export function DrawingSheetEditor({
     [sheet, commit],
   );
 
-  const save = useCallback(() => {
-    const text = serializeDrawingSheet(sheet);
-    download(fileName, text);
-    addRecent(fileName, text);
-    setDirty(false);
-    setStatus(`Saved ${fileName}`);
-  }, [fileName, sheet, addRecent]);
+  // Save the sheet into the open project (IndexedDB/cloud) so the schematic's
+  // Page Settings can select it. Only when no project is open (the standalone
+  // editor) does it fall back to a local-file download.
+  const writeSheet = useCallback(
+    (name: string, note = 'Saved') => {
+      const text = serializeDrawingSheet(sheet);
+      if (onSaveToProject) onSaveToProject(name, text);
+      else download(name, text);
+      addRecent(name, text);
+      setDirty(false);
+      setStatus(`${note} ${name}${onSaveToProject ? ' to project' : ''}`);
+    },
+    [sheet, addRecent, onSaveToProject],
+  );
+
+  const save = useCallback(() => writeSheet(fileName), [writeSheet, fileName]);
 
   const saveAs = useCallback(() => {
     const name = window.prompt('Save drawing sheet as:', fileName) || fileName;
     const finalName = /\.kicad_wks$/i.test(name) ? name : `${name}.kicad_wks`;
-    const text = serializeDrawingSheet(sheet);
     setFileName(finalName);
-    download(finalName, text);
-    addRecent(finalName, text);
-    setDirty(false);
-    setStatus(`Saved ${finalName}`);
-  }, [fileName, sheet, addRecent]);
-
-  // Save into the open project's files (IndexedDB/cloud), so the schematic's
-  // Page Settings can select it — instead of downloading to local disk.
-  const saveToProject = useCallback(() => {
-    if (!onSaveToProject) return;
-    const name = window.prompt('Save drawing sheet into project as:', fileName) || fileName;
-    const finalName = /\.kicad_wks$/i.test(name) ? name : `${name}.kicad_wks`;
-    onSaveToProject(finalName, serializeDrawingSheet(sheet));
-    setFileName(finalName);
-    setDirty(false);
-    setStatus(`Saved ${finalName} to project`);
-  }, [fileName, sheet, onSaveToProject]);
+    writeSheet(finalName);
+  }, [fileName, writeSheet]);
 
   /** Print the sheet: render the page alone to a bitmap and print that. */
   const printSheet = useCallback(() => {
@@ -993,9 +986,6 @@ export function DrawingSheetEditor({
           { sep: true },
           { label: 'Save', icon: 'save', action: save, shortcut: 'Ctrl+S' },
           { label: 'Save As…', icon: 'saveAs', action: saveAs },
-          ...(onSaveToProject
-            ? [{ label: 'Save to Project…', icon: 'save', action: saveToProject }]
-            : []),
           { sep: true },
           { label: 'Print…', icon: 'print', action: printSheet },
           { sep: true },
