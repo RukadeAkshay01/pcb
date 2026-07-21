@@ -26,6 +26,7 @@ import { LibTreeModelAdapter, type SortMode } from '../../../widgets/lib_tree_mo
 import { LibTreeNode, LibTreeNodeType } from '../../../widgets/lib_tree_model.js';
 import { FootprintPreviewWidget } from '../../../widgets/footprint_preview_widget.js';
 import { FootprintSelectWidget } from '../../../widgets/footprint_select_widget.js';
+import { loadFootprintIndex, filterFootprints } from '../../../widgets/footprint_list.js';
 import { SymbolPreviewWidget } from './symbol_preview_widget.js';
 import { generateAliasInfo } from '../generate_alias_info.js';
 import { loadIndex, loadSymbol } from '../symbols/index.js';
@@ -385,10 +386,29 @@ export const PanelSymbolChooser = forwardRef<PanelSymbolChooserHandle, PanelSymb
 
     const validSelection = !!(selectedNode && selectedNode.libId);
     const defaultFootprint = previewSymbol ? symProp(previewSymbol, 'Footprint') : '';
-    const fpFilters = previewSymbol
-      ? symProp(previewSymbol, 'ki_fp_filters').split(/\s+/).filter(Boolean)
-      : [];
+    const fpFilters = useMemo(
+      () =>
+        previewSymbol ? symProp(previewSymbol, 'ki_fp_filters').split(/\s+/).filter(Boolean) : [],
+      [previewSymbol],
+    );
     const shownFootprint = fpOverride || defaultFootprint;
+
+    // FOOTPRINT_SELECT_WIDGET::UpdateList — filter the hosted footprint list
+    // by the symbol's fp_filters (zero filters shows just the default entry).
+    const [fpItems, setFpItems] = useState<string[]>([]);
+    useEffect(() => {
+      if (!showFp || fpFilters.length === 0) {
+        setFpItems([]);
+        return;
+      }
+      let cancelled = false;
+      void loadFootprintIndex().then((index) => {
+        if (!cancelled) setFpItems(filterFootprints(index, fpFilters));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [showFp, fpFilters]);
 
     const tree = (
       <div className="ze-chooser-treepane">
@@ -430,7 +450,7 @@ export const PanelSymbolChooser = forwardRef<PanelSymbolChooserHandle, PanelSymb
             <div style={{ flex: 11, minHeight: 0, display: 'flex' }}>{symbolPreview}</div>
             <FootprintSelectWidget
               defaultFootprint={defaultFootprint}
-              filters={fpFilters}
+              items={fpItems}
               value={fpOverride}
               disabled={!validSelection}
               onFootprintSelected={onFootprintSelected}

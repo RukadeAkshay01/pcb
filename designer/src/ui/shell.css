@@ -1128,6 +1128,16 @@ body {
   padding: 8px;
   border-top: 1px solid var(--chrome-border);
 }
+.ze-fp-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.ze-fp-preview {
+  position: relative;
+  overflow: hidden;
+}
 .ze-fp-note .fp-name {
   color: #1f2329;
   font-weight: 600;

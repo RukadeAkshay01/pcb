@@ -1434,6 +1434,7 @@ export function SchematicEditor({
       mouseLeft: common.input.mouse_left as InputPrefs['mouseLeft'],
       mouseMiddle: common.input.mouse_middle as InputPrefs['mouseMiddle'],
       mouseRight: common.input.mouse_right as InputPrefs['mouseRight'],
+      dragIsMove: es.input.drag_is_move,
       autoStartWires: es.drawing.auto_start_wires,
       crosshair: es.window.cursor.crosshair,
       alwaysShowCrosshair: es.window.cursor.always_show_cursor,

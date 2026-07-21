@@ -84,6 +84,9 @@ export interface InputPrefs {
   mouseLeft: 'select' | 'drag_selected' | 'drag_any';
   mouseMiddle: 'pan' | 'zoom' | 'none';
   mouseRight: 'pan' | 'zoom' | 'none';
+  /** eeschema input.drag_is_move: the mouse-drag gesture performs a Move
+   *  (leave wires behind) instead of a Drag (rubber-band them along). */
+  dragIsMove: boolean;
   autoStartWires: boolean;
   crosshair: 'small' | 'full' | '45';
   alwaysShowCrosshair: boolean;
@@ -102,6 +105,7 @@ export const DEFAULT_INPUT_PREFS: InputPrefs = {
   mouseLeft: 'drag_selected',
   mouseMiddle: 'pan',
   mouseRight: 'pan',
+  dragIsMove: false,
   autoStartWires: true,
   crosshair: 'full',
   alwaysShowCrosshair: false,
@@ -1256,7 +1260,9 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
             : new Set([hit.id]);
         onSelect(hit.id, additive);
         modeRef.current = 'move';
-        moveKindRef.current = 'drag'; // button-drag keeps connections
+        // The drag gesture rubber-bands connected wires along unless the
+        // "drag is move" preference turns it into a plain Move (SCH_MOVE_TOOL).
+        moveKindRef.current = inputPrefs.dragIsMove ? 'move' : 'drag';
         effSelRef.current = effSel;
         moveStartRef.current = world;
         moveDeltaRef.current = { x: 0, y: 0 };
@@ -1306,7 +1312,6 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
       snapConn,
       updateWireChain,
       finishWireChain,
-      snapConn,
       finalizeShape,
       draw,
       inputPrefs,
