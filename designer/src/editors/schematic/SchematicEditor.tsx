@@ -1293,9 +1293,16 @@ export function SchematicEditor({
   // so text copied here pastes into desktop KiCad and vice versa. Paste parses
   // the clipboard, gives everything fresh UUIDs, re-annotates duplicate
   // references, and attaches the items to the cursor until clicked to drop.
+  // Text-entry focus only: a focused checkbox/radio (e.g. the Selection
+  // Filter panel) must not swallow editor hotkeys the way a text box does.
   const isTyping = (): boolean => {
     const el = document.activeElement as HTMLElement | null;
-    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    if (!el) return false;
+    if (el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
+    return (
+      el.tagName === 'INPUT' &&
+      !/^(checkbox|radio|button|range)$/.test((el as HTMLInputElement).type)
+    );
   };
 
   useEffect(() => {
@@ -1669,7 +1676,16 @@ export function SchematicEditor({
       // ACTIONS::selectAll / unselectAll (also on Ctrl+A / Ctrl+Shift+A).
       else if (id === 'selectAll')
         setDoc((d) => {
-          if (d) setSelection(boxSelect(d, libById, { x: 1e15, y: 1e15 }, { x: -1e15, y: -1e15 }));
+          // Select All honors the Selection Filter (SCH_SELECTION_TOOL::SelectAll
+          // runs every item through itemPassesFilter).
+          if (d)
+            setSelection(
+              applySelectionFilter(
+                d,
+                boxSelect(d, libById, { x: 1e15, y: 1e15 }, { x: -1e15, y: -1e15 }),
+                selFilterRef.current,
+              ),
+            );
           return d;
         });
       else if (id === 'unselectAll') setSelection(new Set());
@@ -2003,8 +2019,15 @@ export function SchematicEditor({
         if (e.shiftKey) setSelection(new Set());
         else
           setDoc((d) => {
+            // Honors the Selection Filter, like the menu Select All.
             if (d)
-              setSelection(boxSelect(d, libById, { x: 1e15, y: 1e15 }, { x: -1e15, y: -1e15 }));
+              setSelection(
+                applySelectionFilter(
+                  d,
+                  boxSelect(d, libById, { x: 1e15, y: 1e15 }, { x: -1e15, y: -1e15 }),
+                  selFilterRef.current,
+                ),
+              );
             return d;
           });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
@@ -2084,14 +2107,16 @@ export function SchematicEditor({
         runCommand(deleteByIds(selection));
         setSelection(new Set());
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        // KiCad single-key tool hotkeys (A=symbol, W=wire, …). Skip while typing.
+        // KiCad single-key tool hotkeys (A=symbol, W=wire, …). Skip while
+        // typing — but a focused checkbox/radio isn't typing.
         const tgt = e.target as HTMLElement | null;
         const typing =
           !!tgt &&
-          (tgt.tagName === 'INPUT' ||
-            tgt.tagName === 'TEXTAREA' ||
+          (tgt.tagName === 'TEXTAREA' ||
             tgt.tagName === 'SELECT' ||
-            tgt.isContentEditable);
+            tgt.isContentEditable ||
+            (tgt.tagName === 'INPUT' &&
+              !/^(checkbox|radio|button|range)$/.test((tgt as HTMLInputElement).type)));
         if (typing) return;
         // R / Shift+R / X / Y — rotate & mirror the selection
         // (SCH_ACTIONS::rotateCCW/rotateCW/mirrorH/mirrorV default hotkeys).

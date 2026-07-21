@@ -28,7 +28,6 @@ import {
   isTerminalPoint,
   sheetPinSideAt,
   finishWires,
-  simplifyWireList,
   segIsNull,
   type WireSeg,
   makeRectangle,
@@ -247,21 +246,6 @@ export interface PendingLabel {
   kind: LabelKind;
   text: string;
   shape: LabelShape;
-}
-
-/** Constrain `pt` relative to `anchor` per the active line-posture mode. */
-function constrain(anchor: Vec2, pt: Vec2, mode: LineMode): Vec2 {
-  if (mode === 'free') return pt;
-  const dx = pt.x - anchor.x;
-  const dy = pt.y - anchor.y;
-  const adx = Math.abs(dx);
-  const ady = Math.abs(dy);
-  if (mode === '90') return adx >= ady ? { x: pt.x, y: anchor.y } : { x: anchor.x, y: pt.y };
-  // 45: horizontal, vertical, or pure diagonal — whichever is closest.
-  if (adx > ady * 2.414) return { x: pt.x, y: anchor.y };
-  if (ady > adx * 2.414) return { x: anchor.x, y: pt.y };
-  const d = Math.max(adx, ady);
-  return { x: anchor.x + Math.sign(dx) * d, y: anchor.y + Math.sign(dy) * d };
 }
 
 export interface CanvasController {
@@ -1619,13 +1603,16 @@ export const SchematicCanvas = forwardRef<CanvasController, Props>(function Sche
         return;
       }
 
+      // Skip while typing — a focused checkbox/radio (Selection Filter panel)
+      // isn't typing and must not eat the R/X/Y hotkeys.
       const tgt = e.target as HTMLElement | null;
       if (
         tgt &&
-        (tgt.tagName === 'INPUT' ||
-          tgt.tagName === 'TEXTAREA' ||
+        (tgt.tagName === 'TEXTAREA' ||
           tgt.tagName === 'SELECT' ||
-          tgt.isContentEditable)
+          tgt.isContentEditable ||
+          (tgt.tagName === 'INPUT' &&
+            !/^(checkbox|radio|button|range)$/.test((tgt as HTMLInputElement).type)))
       )
         return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
