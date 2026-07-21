@@ -8,7 +8,7 @@
  */
 
 import { iuToMM } from '@ziroeda/common';
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { parse } from '@ziroeda/sexpr';
 import {
   readBoard,
@@ -1962,6 +1962,141 @@ function describeBoardItem(board: Board, id: string): string {
   }
 }
 
+// ---- KiCad property-grid primitives (PCB_PROPERTIES_PANEL wxPropertyGrid) ----
+const PG_LABEL_W = '48%';
+const PgGroup = ({ label }: { label: string }): JSX.Element => (
+  <div
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 5,
+      padding: '3px 4px',
+      background: 'rgba(255,255,255,0.06)',
+      fontWeight: 600,
+      borderBottom: '1px solid rgba(255,255,255,0.1)',
+    }}
+  >
+    <span style={{ fontSize: 8 }}>▼</span>
+    <span>{label}</span>
+  </div>
+);
+const PgRow = ({ label, children }: { label: string; children: ReactNode }): JSX.Element => (
+  <div
+    style={{
+      display: 'flex',
+      alignItems: 'stretch',
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
+      minHeight: 22,
+    }}
+  >
+    <div
+      style={{
+        width: PG_LABEL_W,
+        padding: '3px 6px',
+        color: '#9aa4b2',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </div>
+    <div
+      style={{
+        flex: 1,
+        padding: '2px 4px',
+        borderLeft: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex',
+        alignItems: 'center',
+        minWidth: 0,
+      }}
+    >
+      {children}
+    </div>
+  </div>
+);
+const PgText = ({
+  label,
+  value,
+  readOnly,
+}: {
+  label: string;
+  value: string;
+  readOnly?: boolean;
+}): JSX.Element => (
+  <PgRow label={label}>
+    {readOnly ? (
+      <span
+        style={{
+          color: '#7f8a99',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {value}
+      </span>
+    ) : (
+      <div
+        style={{
+          flex: 1,
+          padding: '1px 5px',
+          background: '#1c2432',
+          border: '1px solid #2c3647',
+          borderRadius: 2,
+          minHeight: 18,
+          lineHeight: '18px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {value}
+      </div>
+    )}
+  </PgRow>
+);
+const PgCheck = ({ label, checked }: { label: string; checked: boolean }): JSX.Element => (
+  <PgRow label={label}>
+    <input
+      type="checkbox"
+      checked={checked}
+      readOnly
+      style={{ pointerEvents: 'none', margin: 0 }}
+    />
+  </PgRow>
+);
+const PgLayer = ({
+  label,
+  layer,
+  color,
+}: {
+  label: string;
+  layer: string;
+  color: string;
+}): JSX.Element => (
+  <PgRow label={label}>
+    <span
+      style={{
+        display: 'inline-block',
+        width: 12,
+        height: 12,
+        background: color,
+        marginRight: 6,
+        border: '1px solid rgba(0,0,0,0.5)',
+        flex: '0 0 auto',
+      }}
+    />
+    <span>{layer}</span>
+  </PgRow>
+);
+/** Footprint orientation the KiCad way: normalized to (-180°, 180°], trimmed. */
+const fmtOrient = (deg: number): string => {
+  let a = ((deg % 360) + 360) % 360;
+  if (a > 180) a -= 360;
+  return String(Number.parseFloat(a.toFixed(4)));
+};
+
 /** Read-only summary of the current selection for the Properties panel — the
  *  first slice of pcbnew's PCB_PROPERTIES_PANEL (editable fields come later). */
 function PcbSelectionInfo({
@@ -1995,19 +2130,6 @@ function PcbSelectionInfo({
       </div>
     );
     // Collapsible-style group header, like KiCad's property-grid categories.
-    const group = (label: string): JSX.Element => (
-      <div
-        key={`g-${label}`}
-        style={{
-          padding: '3px 4px',
-          marginTop: 4,
-          fontWeight: 600,
-          background: 'rgba(255,255,255,0.05)',
-        }}
-      >
-        {label}
-      </div>
-    );
     if (ref) {
       switch (ref.kind) {
         case 'track': {
@@ -2052,19 +2174,44 @@ function PcbSelectionInfo({
         case 'footprint': {
           const f = board.footprints[ref.index];
           if (f) {
-            // Footprint basics, mirroring PCB_PROPERTIES_PANEL's fields for a
-            // FOOTPRINT (board_item.cpp + footprint.cpp property registrations).
-            const orient = (((f.angle % 360) + 360) % 360).toFixed(4);
+            // Full FOOTPRINT property grid, mirroring PCB_PROPERTIES_PANEL
+            // (board_item.cpp + footprint.cpp property registrations): Basic
+            // Properties, Fields, Attributes and Overrides groups.
+            const attrs = f.attributes ?? [];
+            const has = (a: string): boolean => attrs.includes(a);
             return (
-              <div>
-                {row('Position X', `${mm(f.at.x)} mm`)}
-                {row('Position Y', `${mm(f.at.y)} mm`)}
-                {row('Orientation', `${orient}°`)}
-                {row('Layer', f.layer === 'B.Cu' ? 'B.Cu' : 'F.Cu')}
-                {row('Locked', 'No')}
-                {group('Fields')}
-                {row('Reference', f.reference ?? '')}
-                {row('Value', f.value ?? '')}
+              <div style={{ fontSize: 11 }}>
+                <div style={{ padding: '3px 5px', fontWeight: 600 }}>Footprint</div>
+                <PgGroup label="Basic Properties" />
+                <PgText label="Position X" value={`${mm(f.at.x)} mm`} />
+                <PgText label="Position Y" value={`${mm(f.at.y)} mm`} />
+                <PgCheck label="Locked" checked={!!f.locked} />
+                <PgLayer label="Layer" layer={f.layer} color={layerColor(f.layer)} />
+                <PgText label="Orientation" value={`${fmtOrient(f.angle)}°`} />
+                <PgGroup label="Fields" />
+                <PgText label="Reference" value={f.reference ?? ''} />
+                <PgText label="Value" value={f.value ?? ''} />
+                <PgText label="Library Link" value={f.lib} readOnly />
+                <PgText label="Library Description" value={f.descr ?? ''} readOnly />
+                <PgText label="Keywords" value={f.tags ?? ''} readOnly />
+                <PgText label="Component Class" value="" readOnly />
+                <PgGroup label="Attributes" />
+                <PgCheck label="Not in Schematic" checked={has('board_only')} />
+                <PgCheck
+                  label="Exclude From Position Files"
+                  checked={has('exclude_from_pos_files')}
+                />
+                <PgCheck label="Exclude From Bill of Materials" checked={has('exclude_from_bom')} />
+                <PgCheck label="Do not Populate" checked={has('dnp')} />
+                <PgGroup label="Overrides" />
+                <PgCheck
+                  label="Exempt From Courtyard Requirement"
+                  checked={has('allow_missing_courtyard')}
+                />
+                <PgText label="Clearance Override" value="" />
+                <PgText label="Solderpaste Margin Override" value="" />
+                <PgText label="Solderpaste Margin Ratio Override" value="" />
+                <PgText label="Zone Connection Style" value="Inherited" readOnly />
               </div>
             );
           }
