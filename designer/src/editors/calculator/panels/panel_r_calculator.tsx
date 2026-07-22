@@ -11,13 +11,19 @@ import { useState, type JSX } from 'react';
 import {
   ESERIES,
   ESeriesId,
-  type ResistorSolution,
-  calculateResistorSubstitution,
+  RES_EQUIV_FIRST_VALUE,
+  RES_EQUIV_LAST_VALUE,
+  type Resistance,
+  resEquivCalc,
 } from '@ziroeda/pcb_calculator';
-import { fmt, parseNum } from '../fields.js';
+import { parseNum } from '../fields.js';
 
 // The resistor calculator offers only the coarser series (E1…E24).
 const R_SERIES = ESERIES.filter((e) => e.id <= ESeriesId.E24);
+
+// KiCad accepts targets a bit beyond the series span (panel_r_calculator.cpp).
+const MIN_TARGET = RES_EQUIV_FIRST_VALUE / 4;
+const MAX_TARGET = RES_EQUIV_LAST_VALUE * 4;
 
 interface SolutionRow {
   formula: string;
@@ -31,10 +37,17 @@ interface Solutions {
 
 const emptyRow = (): SolutionRow => ({ formula: '', approxPct: '' });
 
-const rowOf = (s: ResistorSolution): SolutionRow => ({
-  formula: s.formula,
-  approxPct: Math.abs(s.deviationPct) < 1e-9 ? '0' : fmt(s.deviationPct, 3),
-});
+// Mirrors KiCad's showResult: absent level → "Not worth using"; error text is
+// "Exact", "<0.01" or a signed percentage with two decimals.
+const rowOf = (s: Resistance | undefined, targetOhm: number): SolutionRow => {
+  if (!s) return { formula: 'Not worth using', approxPct: '' };
+  const errorPct = (s.value / targetOhm - 1) * 100;
+  let approxPct: string;
+  if (Math.abs(errorPct) < 1e-12) approxPct = 'Exact';
+  else if (Math.abs(errorPct) < 0.01) approxPct = '<0.01';
+  else approxPct = `${errorPct >= 0 ? '+' : ''}${errorPct.toFixed(2)}`;
+  return { formula: s.name, approxPct };
+};
 
 export function PanelRCalculator(): JSX.Element {
   const [required, setRequired] = useState(''); // kΩ
@@ -48,17 +61,23 @@ export function PanelRCalculator(): JSX.Element {
     setError('');
     setSol(null);
     const targetOhm = parseNum(required) * 1000;
-    if (!(targetOhm > 0)) {
-      setError('Enter a required resistance in kΩ.');
+    if (Number.isNaN(targetOhm) || targetOhm < MIN_TARGET || targetOhm > MAX_TARGET) {
+      setError(`Incorrect required resistance value: ${required}`);
       return;
     }
-    const excl = [parseNum(exclude1) * 1000, parseNum(exclude2) * 1000].filter((v) => v > 0);
-    const res = calculateResistorSubstitution(targetOhm, serie, excl);
+    // As in KiCad: the required value itself is excluded (it needs replacing
+    // precisely because it is not available), plus up to two entered values.
+    const excl = [targetOhm, parseNum(exclude1) * 1000, parseNum(exclude2) * 1000];
+    const res = resEquivCalc(targetOhm, serie, excl);
     if (!res) {
       setError('No solution in range (10 Ω … 1 MΩ).');
       return;
     }
-    setSol({ simple: rowOf(res.r2), r3: rowOf(res.r3), r4: rowOf(res.r4) });
+    setSol({
+      simple: rowOf(res.s2r, targetOhm),
+      r3: rowOf(res.s3r, targetOhm),
+      r4: rowOf(res.s4r, targetOhm),
+    });
   };
 
   const solutionRow = (label: string, row: SolutionRow): JSX.Element => (
