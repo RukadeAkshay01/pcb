@@ -170,6 +170,40 @@ const SETTINGS_TOGGLES = new Set([
 ]);
 const PX_PER_MM_100 = 3.7795;
 
+// The "Current Tool" status-bar field (EDA_DRAW_FRAME::DisplayToolMsg):
+// TOOLS_HOLDER::PushTool shows the active action's FriendlyName; the idle
+// selection tool reads "Select item(s)". Names from sch_actions.cpp /
+// actions.cpp FriendlyName().
+const SCH_TOOL_MSGS: Record<string, string> = {
+  select: 'Select item(s)',
+  selectLasso: 'Select item(s)',
+  highlightNet: 'Highlight Nets',
+  placeSymbol: 'Place Symbols',
+  placePower: 'Place Power Symbols',
+  drawWire: 'Draw Wires',
+  drawBus: 'Draw Buses',
+  busEntry: 'Place Wire to Bus Entries',
+  noConnect: 'Place/Remove No Connect Flags',
+  junction: 'Place Junctions',
+  placeLabel: 'Place Net Labels',
+  placeClassLabel: 'Place Directive Labels',
+  placeGlobalLabel: 'Place Global Labels',
+  placeHierLabel: 'Place Hierarchical Labels',
+  drawSheet: 'Draw Hierarchical Sheets',
+  sheetPin: 'Place Pins from Sheet',
+  placeText: 'Draw Text',
+  textBox: 'Draw Text Boxes',
+  table: 'Draw Tables',
+  rectangle: 'Draw Rectangles',
+  circle: 'Draw Circles',
+  arc: 'Draw Arcs',
+  bezier: 'Draw Bezier Curve',
+  lines: 'Draw Lines',
+  image: 'Place Images',
+  delete: 'Interactive Delete Tool',
+  zoomTool: 'Zoom to Selection Area',
+};
+
 // Right-toolbar tool ids that place a text label, mapped to the label kind.
 const LABEL_TOOL_KINDS: Record<string, LabelKind> = {
   placeLabel: 'label',
@@ -406,6 +440,12 @@ export function SchematicEditor({
   // and locked items — the selection accepts.
   const [selFilter, setSelFilter] = useState<SelectionFilterOptions>(defaultSelectionFilter);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
+  // Status-bar relative coordinates: dx/dy/dist measure from this origin,
+  // which Space resets to the cursor (ACTIONS::resetLocalCoords;
+  // COMMON_TOOLS::ResetLocalCoords sets SCH_SCREEN::m_LocalOrigin).
+  const [localOrigin, setLocalOrigin] = useState<Vec2>({ x: 0, y: 0 });
+  const cursorRef = useRef<Vec2 | null>(null);
+  cursorRef.current = cursor;
   const [scale, setScale] = useState(1);
   // The symbol whose properties dialog is open (its refId), or null.
   const [propsTarget, setPropsTarget] = useState<string | null>(null);
@@ -2291,6 +2331,13 @@ export function SchematicEditor({
           setHighlightItem(null);
           return;
         }
+        // Space — reset the status bar's relative (dx/dy) origin to the
+        // cursor (ACTIONS::resetLocalCoords).
+        if (e.key === ' ' && !e.shiftKey) {
+          e.preventDefault();
+          if (cursorRef.current) setLocalOrigin({ ...cursorRef.current });
+          return;
+        }
         // Shift+Space — cycle the wire/bus line mode free → 90° → 45°
         // (SCH_ACTIONS::lineModeNext; SCH_EDITOR_CONTROL::NextLineMode).
         if (e.key === ' ' && e.shiftKey) {
@@ -2775,8 +2822,9 @@ export function SchematicEditor({
           X {cursor ? fmt(cursor.x) : '—'} Y {cursor ? fmt(cursor.y) : '—'}
         </span>
         <span className="cell">
-          dx {cursor ? fmt(cursor.x) : '—'} dy {cursor ? fmt(cursor.y) : '—'} dist{' '}
-          {cursor ? fmt(Math.hypot(cursor.x, cursor.y)) : '—'}
+          dx {cursor ? fmt(cursor.x - localOrigin.x) : '—'} dy{' '}
+          {cursor ? fmt(cursor.y - localOrigin.y) : '—'} dist{' '}
+          {cursor ? fmt(Math.hypot(cursor.x - localOrigin.x, cursor.y - localOrigin.y)) : '—'}
         </span>
         <span className="cell">
           grid {(() => {
@@ -2794,6 +2842,7 @@ export function SchematicEditor({
         <span className="cell" title="build">
           {__BUILD_STAMP__}
         </span>
+        <span className="cell">{SCH_TOOL_MSGS[activeTool] ?? ''}</span>
       </div>
 
       {chooserOpen && (
