@@ -10,6 +10,13 @@ import {
   deleteBoardItems,
   rotateBoardItems,
   duplicateBoardItems,
+  mirrorBoardItems,
+  groupBoardItems,
+  ungroupBoardItems,
+  expandGroupIds,
+  groupContaining,
+  setBoardItemsLocked,
+  isBoardItemLocked,
 } from '@ziroeda/pcbnew/src/edit-board.js';
 import { parse } from '@ziroeda/sexpr/src/index.js';
 import { readBoard } from '@ziroeda/pcbnew/src/read-board.js';
@@ -111,6 +118,7 @@ const board = (over: Partial<Board>): Board => ({
   zones: [],
   shapes: [],
   texts: [],
+  groups: [],
   source: EMPTY,
   ...over,
 });
@@ -498,5 +506,84 @@ describe('canonical builders (source-less items append + re-read)', () => {
     expect(reread.shapes).toHaveLength(1);
     expect(reread.texts).toHaveLength(1);
     expect(reread.texts[0]!.text).toBe('HI');
+  });
+});
+
+describe('groups (PCB_GROUP: group / ungroup / expansion)', () => {
+  const t0 = { ...track({ x: 0, y: 0 }, { x: 1000, y: 0 }, 100), uuid: 'uuid-t0' };
+  const t1 = { ...track({ x: 0, y: 500 }, { x: 1000, y: 500 }, 100), uuid: 'uuid-t1' };
+  it('groups two tracks, resolves member clicks to the group, expands back', () => {
+    const b = board({ tracks: [t0, t1] });
+    const { board: g, id } = groupBoardItems(b, new Set(['track:0', 'track:1']), 'pair');
+    expect(id).toBe('group:0');
+    expect(g.groups[0]!.members.sort()).toEqual(['uuid-t0', 'uuid-t1']);
+    // Clicking a member selects the top-level group.
+    expect(groupContaining(g, 'track:0')).toBe('group:0');
+    // Editing commands act on the expansion.
+    expect([...expandGroupIds(g, new Set(['group:0']))].sort()).toEqual(['track:0', 'track:1']);
+  });
+  it('ungroup dissolves the group and keeps the members', () => {
+    const b = board({ tracks: [t0, t1] });
+    const { board: g } = groupBoardItems(b, new Set(['track:0', 'track:1']));
+    const u = ungroupBoardItems(g, new Set(['group:0']));
+    expect(u.groups).toHaveLength(0);
+    expect(u.tracks).toHaveLength(2);
+  });
+  it('round-trips the exact (group …) s-expression: sorted members, no empty groups', () => {
+    const src = `(kicad_pcb (version 20241229) (generator x)
+      (segment (start 0 0) (end 1 0) (width 0.2) (layer "F.Cu") (net 0) (uuid "uuid-b"))
+      (segment (start 0 1) (end 1 1) (width 0.2) (layer "F.Cu") (net 0) (uuid "uuid-a"))
+    )`;
+    const b = readBoard(parse(src));
+    const { board: g } = groupBoardItems(b, new Set(['track:0', 'track:1']), 'G1');
+    const out = serializeBoard(g);
+    expect(out).toContain('(group "G1"');
+    // Members are written sorted alphabetically (PCB_IO_KICAD_SEXPR).
+    expect(out).toMatch(/\(members\s+"uuid-a"\s+"uuid-b"\)/);
+    const reread = readBoard(parse(out));
+    expect(reread.groups).toHaveLength(1);
+    expect(reread.groups[0]!.name).toBe('G1');
+    expect(reread.groups[0]!.members).toEqual(['uuid-a', 'uuid-b']);
+    // Deleting the group (with its expansion) drops the node entirely.
+    const gone = deleteBoardItems(reread, new Set(['group:0', 'track:0', 'track:1']));
+    expect(serializeBoard(gone)).not.toContain('(group');
+  });
+});
+
+describe('lock / unlock ((locked yes) on every lockable kind)', () => {
+  it('locks a track: model + serialized token; unlock removes it', () => {
+    const src = `(kicad_pcb (version 20241229) (generator x)
+      (segment (start 0 0) (end 1 0) (width 0.2) (layer "F.Cu") (net 0) (uuid "u1"))
+    )`;
+    const b = readBoard(parse(src));
+    const locked = setBoardItemsLocked(b, new Set(['track:0']), true);
+    expect(isBoardItemLocked(locked, 'track:0')).toBe(true);
+    expect(serializeBoard(locked)).toContain('(locked yes)');
+    const unlocked = setBoardItemsLocked(locked, new Set(['track:0']), false);
+    expect(isBoardItemLocked(unlocked, 'track:0')).toBe(false);
+    expect(serializeBoard(unlocked)).not.toContain('(locked');
+  });
+  it('reads (locked yes) from the file', () => {
+    const src = `(kicad_pcb (version 20241229) (generator x)
+      (segment (start 0 0) (end 1 0) (width 0.2) (layer "F.Cu") (net 0) (locked yes) (uuid "u1"))
+    )`;
+    expect(isBoardItemLocked(readBoard(parse(src)), 'track:0')).toBe(true);
+  });
+});
+
+describe('mirror (EDIT_TOOL::Mirror)', () => {
+  it('mirrorV flips y about the selection centre; x untouched', () => {
+    const b = board({ tracks: [track({ x: 0, y: 0 }, { x: 1000, y: 400 }, 100)] });
+    const m = mirrorBoardItems(b, new Set(['track:0']), 'v');
+    // bbox centre y = 200 → y' = 400 − y.
+    expect(m.tracks[0]!.start).toEqual({ x: 0, y: 400 });
+    expect(m.tracks[0]!.end).toEqual({ x: 1000, y: 0 });
+  });
+  it('mirrorH flips x; footprints are skipped (KiCad: use Flip)', () => {
+    const fp = footprint([pad({ x: 5000, y: 5000 }, 400, 400)]);
+    const b = board({ tracks: [track({ x: 0, y: 0 }, { x: 1000, y: 0 }, 100)], footprints: [fp] });
+    const m = mirrorBoardItems(b, new Set(['track:0', 'footprint:0']), 'h');
+    expect(m.footprints[0]!.at).toEqual(fp.at); // untouched
+    expect(m.tracks[0]!.start.x).not.toBe(0); // mirrored
   });
 });
