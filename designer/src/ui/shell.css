@@ -139,6 +139,51 @@ body {
   height: 28px;
 }
 
+/* ACTION_TOOLBAR group button: triangle in the bottom-right corner
+   (side ≈ button height / 5) marking that a long-press opens a palette. */
+.ze-tb-groupwrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--chrome-fg);
+}
+.ze-tb-arrow {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  pointer-events: none;
+}
+.ze-tb-arrow.disabled {
+  opacity: 0.35;
+}
+
+/* ACTION_TOOLBAR_PALETTE: the flyout with the rest of a group's actions,
+   perpendicular to the toolbar. 4px border around the buttons, 1px between. */
+.ze-tb-palette {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  padding: 4px;
+  gap: 2px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.ze-tb-palette.horizontal {
+  flex-direction: row;
+}
+.ze-tb-palette.vertical {
+  flex-direction: column;
+}
+.ze-tb-palette .ze-tbtn {
+  width: 28px;
+  height: 28px;
+}
+
 .ze-sep {
   flex: 0 0 auto;
   background: var(--chrome-border);

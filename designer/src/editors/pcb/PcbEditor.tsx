@@ -218,10 +218,18 @@ export function PcbEditor({
   const [objects, setObjects] = useState<ObjectState>(DEFAULT_OBJECTS);
   const [opacity, setOpacity] = useState(DEFAULT_OPACITY);
   const [selFilter, setSelFilter] = useState<Set<string>>(
-    new Set(PCB_FILTER_CATS.map((c) => c[0])),
+    new Set(PCB_FILTER_CATS.map((c) => c.key)),
   );
+  // Right-click "Only <category>" popup of the Selection Filter panel
+  // (PANEL_SELECTION_FILTER::onRightClick).
+  const [filterMenu, setFilterMenu] = useState<{
+    x: number;
+    y: number;
+    key: string;
+    label: string;
+  } | null>(null);
   const [netQuery, setNetQuery] = useState('');
-  const [activeTool, setActiveTool] = useState('select');
+  const [activeTool, setActiveTool] = useState('selectSetRect');
   // Selected board items (PCB_SELECTION_TOOL's selection), by `${kind}:${index}` id.
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   // Disambiguation menu (PCB_SELECTION_TOOL::doSelectionMenu): shown at a click
@@ -282,6 +290,9 @@ export function PcbEditor({
   // Mirror of `disambig` open-state for the global Escape handler (no re-subscribe).
   const disambigRef = useRef(false);
   disambigRef.current = !!disambig;
+  // Mirror of the active right-toolbar tool for the pointer/Escape handlers.
+  const activeToolRef = useRef('selectSetRect');
+  activeToolRef.current = activeTool;
   const sceneRef = useRef<BoardScene | null>(null);
   const rafRef = useRef(0);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -1076,6 +1087,8 @@ export function PcbEditor({
     const d = downRef.current;
     if (d) {
       if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 3 * dpr) d.moved = true;
+      // The delete tool acts on clicks only — no drag-move or box select.
+      if (activeToolRef.current === 'deleteTool') return;
       if (d.moved && d.world) {
         const cur = worldAt(e.clientX, e.clientY);
         if (!cur) return;
@@ -1112,7 +1125,21 @@ export function PcbEditor({
     movingRef.current = false;
     if (d) {
       if (!d.moved) {
-        clickSelect(e.clientX, e.clientY, d.shift);
+        // Interactive Delete Tool (PCB_CONTROL::DeleteItemCursor): each click
+        // deletes the item under the cursor, honouring the selection filter.
+        if (activeToolRef.current === 'deleteTool') {
+          const w = worldAt(e.clientX, e.clientY);
+          const brd = boardRef.current;
+          if (w && brd) {
+            const hit = boardHitCandidates(brd, w, tolOf()).filter(passesFilter)[0];
+            if (hit) {
+              commitBoard(deleteBoardItems(brd, new Set([hit])));
+              setSelection(new Set());
+            }
+          }
+        } else {
+          clickSelect(e.clientX, e.clientY, d.shift);
+        }
       } else if (moved) {
         // Drop the left-drag move (EDIT_TOOL Move); a zero net delta restores.
         commitMove();
@@ -1194,6 +1221,9 @@ export function PcbEditor({
         if (disambigRef.current) {
           hoverRef.current = null;
           setDisambig(null);
+        } else if (activeToolRef.current !== 'selectSetRect') {
+          // Esc in a tool returns to the selection tool (TOOL_MANAGER).
+          setActiveTool('selectSetRect');
         } else {
           setShow3D(false);
           setSelection(new Set());
@@ -1772,23 +1802,35 @@ export function PcbEditor({
             <div className="ze-panel">
               <div className="ze-panel-header">Selection Filter</div>
               <div className="ze-panel-body">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selFilter.size === PCB_FILTER_CATS.length}
-                    onChange={() =>
-                      setSelFilter((p) =>
-                        p.size === PCB_FILTER_CATS.length
-                          ? new Set()
-                          : new Set(PCB_FILTER_CATS.map((c) => c[0])),
-                      )
-                    }
-                  />
-                  All items
-                </label>
+                {/* PANEL_SELECTION_FILTER_BASE's wxGridBagSizer: "All items"
+                    at (0,0), then the categories two per row in upstream
+                    order. Right-clicking a category pops "Only <label>". */}
                 <div className="ze-selfilter">
-                  {PCB_FILTER_CATS.map(([key, label]) => (
-                    <label key={key}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selFilter.size === PCB_FILTER_CATS.length}
+                      onChange={() =>
+                        // OnFilterChanged on m_cbAllItems: drive every
+                        // category to the new state.
+                        setSelFilter((p) =>
+                          p.size === PCB_FILTER_CATS.length
+                            ? new Set()
+                            : new Set(PCB_FILTER_CATS.map((c) => c.key)),
+                        )
+                      }
+                    />
+                    All items
+                  </label>
+                  {PCB_FILTER_CATS.map(({ key, label, tooltip }) => (
+                    <label
+                      key={key}
+                      title={tooltip}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setFilterMenu({ x: e.clientX, y: e.clientY, key, label });
+                      }}
+                    >
                       <input
                         type="checkbox"
                         checked={selFilter.has(key)}
@@ -1815,10 +1857,7 @@ export function PcbEditor({
           orientation="vertical"
           side="right"
           activeTool={activeTool}
-          onActivate={(id) => {
-            if (id === 'delete') deleteSel();
-            else setActiveTool(id);
-          }}
+          onActivate={setActiveTool}
         />
       </div>
 
@@ -1920,6 +1959,48 @@ export function PcbEditor({
                 {describeBoardItem(board, id)}
               </div>
             ))}
+          </div>
+        </>
+      )}
+
+      {/* Selection Filter right-click menu (PANEL_SELECTION_FILTER::onRightClick):
+          a single "Only <category>" entry that unchecks everything else. */}
+      {filterMenu && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 60 }}
+            onMouseDown={() => setFilterMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setFilterMenu(null);
+            }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              left: Math.min(filterMenu.x, window.innerWidth - 200),
+              top: filterMenu.y,
+              zIndex: 61,
+              background: '#26262b',
+              border: '1px solid #444',
+              borderRadius: 4,
+              minWidth: 160,
+              padding: '4px 0',
+              fontSize: 12,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div
+              className="ze-tree-item"
+              style={{ padding: '3px 12px', cursor: 'pointer' }}
+              onClick={() => {
+                setSelFilter(new Set([filterMenu.key]));
+                setFilterMenu(null);
+              }}
+            >
+              Only {filterMenu.label.toLowerCase()}
+            </div>
           </div>
         </>
       )}
