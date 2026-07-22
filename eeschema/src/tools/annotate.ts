@@ -83,6 +83,14 @@ interface Candidate {
   origFull?: string;
 }
 
+/** One unit's claim on a shared reference number (REFDES_TRACKER's view of a
+ *  multi-unit occupant: library id + value + unit). */
+interface UnitRec {
+  lib: string;
+  value: string;
+  unit: number;
+}
+
 /**
  * Compute the new symbols array with references (re)assigned per `opts`.
  * `selectedIds` is required for scope 'selection'. Returns the same array
@@ -101,15 +109,26 @@ export function annotateSymbols(
   };
 
   const candidates: Candidate[] = [];
-  const reserved = new Map<string, Set<number>>(); // prefix → numbers already taken
-  const reserve = (prefix: string, n: number): void => {
-    let set = reserved.get(prefix);
-    if (!set) {
-      set = new Set();
-      reserved.set(prefix, set);
+  const valueOf = (s: SchSymbol): string => s.fields.find((f) => f.key === 'Value')?.value ?? '';
+  // prefix → number → occupants. 'full' = a single-unit symbol owns the number
+  // outright; a UnitRec list = multi-unit occupants that may share it.
+  const reserved = new Map<string, Map<number, 'full' | UnitRec[]>>();
+  const reserve = (prefix: string, n: number, rec?: UnitRec): void => {
+    let nums = reserved.get(prefix);
+    if (!nums) {
+      nums = new Map();
+      reserved.set(prefix, nums);
     }
-    set.add(n);
+    const cur = nums.get(n);
+    if (!rec || cur === 'full') nums.set(n, 'full');
+    else if (!cur) nums.set(n, [rec]);
+    else cur.push(rec);
   };
+  const unitRecOf = (sym: SchSymbol): UnitRec => ({
+    lib: sym.libId,
+    value: valueOf(sym),
+    unit: sym.unit,
+  });
 
   doc.symbols.forEach((sym, index) => {
     const ref = referenceOf(sym);
@@ -119,7 +138,7 @@ export function annotateSymbols(
     const multiUnit = unitCount(sym.libId, libById) > 1;
     if (!inScope(index, sym)) {
       // Out-of-scope symbols reserve their numbers (additionalRefs).
-      if (num !== undefined) reserve(prefix, num);
+      if (num !== undefined) reserve(prefix, num, multiUnit ? unitRecOf(sym) : undefined);
       return;
     }
     const isNew = opts.resetExisting || num === undefined;
@@ -133,7 +152,7 @@ export function annotateSymbols(
       origFull: num !== undefined ? `${prefix}${num}` : undefined,
     });
     // A kept (not-new) reference reserves its number.
-    if (!isNew && num !== undefined) reserve(prefix, num);
+    if (!isNew && num !== undefined) reserve(prefix, num, multiUnit ? unitRecOf(sym) : undefined);
   });
 
   if (candidates.length === 0) return doc.symbols;
@@ -164,15 +183,38 @@ export function annotateSymbols(
         return opts.startNumber + 1;
     }
   };
-  const firstFree = (prefix: string, min: number): number => {
-    const taken = reserved.get(prefix);
-    let n = min;
-    while (taken?.has(n)) n++;
-    return n;
+  // REFDES_TRACKER::GetNextRefDesForUnits + areUnitsAvailable: the first
+  // number ≥ min that is either unused, or (for a multi-unit symbol) occupied
+  // only by units of the same library symbol and value with every required
+  // unit slot still free — so two fresh ECC83 halves become U1A and U1B.
+  const firstFree = (
+    prefix: string,
+    min: number,
+    forUnits?: { lib: string; value: string; units: readonly number[] },
+  ): number => {
+    const nums = reserved.get(prefix);
+    for (let n = min; ; n++) {
+      const cur = nums?.get(n);
+      if (!cur) return n;
+      if (cur === 'full' || !forUnits) continue;
+      const free = forUnits.units.every((u) =>
+        cur.every((r) => r.lib === forUnits.lib && r.value === forUnits.value && r.unit !== u),
+      );
+      if (free) return n;
+    }
   };
 
   // Multi-unit symbols that already shared a full reference keep sharing a
-  // number: the group's first-assigned number is reused for the rest.
+  // number (the aLockedUnitMap path): the group is renumbered together, onto
+  // a number with room for all of its units.
+  const groupUnits = new Map<string, number[]>(); // origFull → member units
+  for (const c of ordered) {
+    if (c.isNew && c.multiUnit && c.origFull) {
+      const arr = groupUnits.get(c.origFull) ?? [];
+      arr.push(c.sym.unit);
+      groupUnits.set(c.origFull, arr);
+    }
+  }
   const groupNumber = new Map<string, number>(); // origFull → assigned number
 
   const newRefFor = new Map<number, string>(); // symbol index → new reference
@@ -181,11 +223,18 @@ export function annotateSymbols(
     let n: number;
     if (c.multiUnit && c.origFull && groupNumber.has(c.origFull)) {
       n = groupNumber.get(c.origFull)!;
+    } else if (c.multiUnit) {
+      const units = c.origFull ? groupUnits.get(c.origFull)! : [c.sym.unit];
+      n = firstFree(c.prefix, minRefId(), {
+        lib: c.sym.libId,
+        value: valueOf(c.sym),
+        units,
+      });
+      if (c.origFull) groupNumber.set(c.origFull, n);
     } else {
       n = firstFree(c.prefix, minRefId());
-      reserve(c.prefix, n);
-      if (c.multiUnit && c.origFull) groupNumber.set(c.origFull, n);
     }
+    reserve(c.prefix, n, c.multiUnit ? unitRecOf(c.sym) : undefined);
     newRefFor.set(c.index, `${c.prefix}${n}`);
   }
 
