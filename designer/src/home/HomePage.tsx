@@ -110,10 +110,11 @@ const TILES: Tile[] = [
     enabled: true,
   },
   {
+    // Greyed out for now: the plugin/content manager still needs a lot of work,
+    // so it ships after the web-app launch. No `enabled` → "coming soon".
     id: 'pcm',
     name: 'Plugin and Content Manager',
     desc: 'Manage downloadable packages from KiCad and 3rd party repositories',
-    enabled: true,
   },
 ];
 

@@ -2,8 +2,7 @@ import { useState, type FormEvent, type JSX } from 'react';
 import { useAuth } from './AuthProvider.js';
 
 /**
- * Sign-in dialog — opened from the project manager (never a wall; the app is
- * usable as a guest). Methods, easiest first:
+ * Sign-in dialog. Methods, easiest first:
  *
  *   1. Continue with Google (OAuth redirect);
  *   2. Email code: enter your email, we send a 6-digit code, enter it, done —
@@ -12,10 +11,20 @@ import { useAuth } from './AuthProvider.js';
  *   3. "Use a password instead" — the classic email+password pair, kept for
  *      existing accounts.
  *
- * On first sign-in the cloud sync pushes every guest-made local project up,
- * so nothing made before creating the account is lost.
+ * `gate` mode (AuthGate) makes it a required wall: no close button, backdrop
+ * clicks don't dismiss it, and the copy invites creating an account. Otherwise
+ * it's an optional modal opened from the project manager. `onClose` is a no-op
+ * in gate mode — a successful sign-in flips the auth state and AuthGate swaps
+ * the wall for the app on its own.
  */
-export function SignInDialog({ onClose }: { onClose: () => void }): JSX.Element {
+export function SignInDialog({
+  onClose,
+  gate = false,
+}: {
+  onClose?: () => void;
+  gate?: boolean;
+}): JSX.Element {
+  const close = onClose ?? ((): void => {});
   const { signIn, signUp, signInWithGoogle, sendOtp, verifyOtp } = useAuth();
   // 'code' = passwordless email code (default); 'password' = classic fallback.
   const [method, setMethod] = useState<'code' | 'password'>('code');
@@ -55,13 +64,13 @@ export function SignInDialog({ onClose }: { onClose: () => void }): JSX.Element 
 
   async function onVerifyCode(e: FormEvent) {
     e.preventDefault();
-    if (await run(() => verifyOtp(email, code.trim()))) onClose();
+    if (await run(() => verifyOtp(email, code.trim()))) close();
   }
 
   async function onPassword(e: FormEvent) {
     e.preventDefault();
     if (pwMode === 'signin') {
-      if (await run(() => signIn(email, password))) onClose();
+      if (await run(() => signIn(email, password))) close();
     } else {
       setError(null);
       setBusy(true);
@@ -69,7 +78,7 @@ export function SignInDialog({ onClose }: { onClose: () => void }): JSX.Element 
         const { error, needsConfirm } = await signUp(email, password);
         if (error) setError(error);
         else if (needsConfirm) setConfirmSent(true);
-        else onClose();
+        else close();
       } finally {
         setBusy(false);
       }
@@ -91,19 +100,26 @@ export function SignInDialog({ onClose }: { onClose: () => void }): JSX.Element 
   );
 
   return (
-    <div className="ze-modal-backdrop" onMouseDown={onClose}>
+    <div
+      className={`ze-modal-backdrop${gate ? ' ze-auth-gate-scrim' : ''}`}
+      onMouseDown={gate ? undefined : close}
+    >
       <div
         className="ze-auth-card ze-auth-modal"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Sign in"
       >
-        <span className="ze-auth-close" title="Close" onClick={onClose}>
-          ✕
-        </span>
+        {!gate && (
+          <span className="ze-auth-close" title="Close" onClick={close}>
+            ✕
+          </span>
+        )}
         <div className="ze-auth-brand">Ziro Designer</div>
         <div className="ze-auth-sub">
-          Sign in to back up your projects to the cloud and use them on any device.
+          {gate
+            ? 'Sign in or create a free account to start designing — the full KiCad experience, right in your browser.'
+            : 'Sign in to back up your projects to the cloud and use them on any device.'}
         </div>
 
         <button

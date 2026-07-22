@@ -2262,9 +2262,33 @@ body {
   line-height: 1.5;
 }
 
-/* Sign-in as a modal (guest-first: opened from the header/nudge, never a wall). */
+/* Sign-in as a modal (opened from the header/nudge for a signed-out user who
+   dismissed the wall isn't possible — kept for completeness / future reuse). */
 .ze-auth-modal {
   position: relative;
+}
+
+/* Required sign-in wall (AuthGate): the real editor renders blurred and inert
+   behind the centred card, so visitors preview what they unlock by signing up. */
+.ze-auth-gate {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--chrome-bg2);
+}
+.ze-auth-gate-app {
+  position: absolute;
+  inset: 0;
+  filter: blur(5px) saturate(0.92) brightness(0.85);
+  /* Scale up slightly so the blur doesn't reveal soft edges at the borders. */
+  transform: scale(1.03);
+  transform-origin: center;
+  pointer-events: none;
+  user-select: none;
+}
+/* Lighter than the default modal backdrop so the blurred app shows through. */
+.ze-modal-backdrop.ze-auth-gate-scrim {
+  background: rgba(10, 12, 16, 0.35);
 }
 .ze-auth-close {
   position: absolute;

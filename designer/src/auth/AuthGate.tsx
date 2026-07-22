@@ -1,20 +1,27 @@
 import type { JSX, ReactNode } from 'react';
 import { authEnabled } from './supabaseClient.js';
 import { useAuth } from './AuthProvider.js';
+import { SignInDialog } from './SignIn.js';
 
 /**
- * Guest-first entry: the app is never blocked behind sign-in. New users land
- * directly in the project manager and work saves locally (IndexedDB); signing
- * in — offered from the home page, not forced here — adds cloud backup and
- * pushes any guest-made projects up on first sign-in (cloud/sync.ts).
+ * Sign-in wall. When Supabase auth is configured, the app is gated behind a
+ * sign-in: visitors must create an account (or sign in) before they can use it.
+ * To show what they're signing up for, the real editor is rendered blurred and
+ * inert behind the centred sign-in card — the KiCad-like UI is right there,
+ * just out of reach until you're in.
  *
- * The only thing this gate still does is hold the first paint for the brief
- * moment Supabase resolves an *existing* session, so a signed-in user doesn't
- * flash the signed-out UI on every reload.
+ * (Guest-first entry was tried earlier but backfired — almost nobody signed in,
+ * so the value of an account never landed. This puts the account up front while
+ * still previewing the product behind the glass.)
+ *
+ * When auth is disabled (no Supabase env vars) the app runs fully offline and
+ * this gate is a passthrough.
  */
 export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
-  const { loading } = useAuth();
+  const { session, loading } = useAuth();
 
+  // Hold the first paint while an existing session resolves, so a signed-in
+  // user doesn't flash the wall on every reload.
   if (authEnabled && loading) {
     return (
       <div className="ze-auth">
@@ -22,5 +29,17 @@ export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
       </div>
     );
   }
+
+  if (authEnabled && !session) {
+    return (
+      <div className="ze-auth-gate">
+        <div className="ze-auth-gate-app" aria-hidden="true">
+          {children}
+        </div>
+        <SignInDialog gate />
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }
