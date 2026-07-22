@@ -97,7 +97,7 @@ export const PCB_SPECIAL = {
   anchor: rgba(255, 38, 226),
   drawingSheet: rgba(200, 114, 171),
   // Pad number text, drawn over the pad copper (KiCad's LAYER_PADS names).
-  padName: rgba(255, 255, 255, 0.85),
+  padName: rgba(255, 255, 255, 0.9),
 };
 
 /**

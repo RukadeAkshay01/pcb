@@ -507,6 +507,75 @@ function addText(map: Map<number, Path2D>, t: PcbTextItem): void {
   }
 }
 
+// KiCad caps pad-label font size (PCB_RENDER_SETTINGS::MAX_FONT_SIZE = 10mm).
+const MAX_PAD_FONT = 10 * MM;
+
+/**
+ * Pad number (top) + net name (bottom) drawn on a pad, a faithful port of the
+ * netname-layer branch of PCB_PAINTER::draw(PAD): the text runs along the pad's
+ * longer axis, both are bold and centred, and the sizes come from KiCad's
+ * "magic numbers" (1.5·along / max(chars, 3|5), halved and offset when both are
+ * shown). Rendered into the scene's padText stroke map.
+ */
+function addPadLabels(scene: BoardScene, pad: PcbPad, netName: string): void {
+  const padNumber = pad.number ?? '';
+  const showNet = netName !== '' && (pad.net ?? 0) > 0;
+  if (padNumber === '' && !showNet) return;
+
+  const round = pad.shape === 'circle' || pad.shape === 'oval';
+  let px = pad.size.x; // along the text baseline
+  let py = pad.size.y; // perpendicular (drives the font size)
+  let angle = pad.angle ?? 0;
+  let size = py;
+  // Portrait pad: rotate the text 90° and run it down the taller axis.
+  if (px < py * 0.95) {
+    angle += 90;
+    size = px;
+    [px, py] = [py, px];
+  }
+  if (size > MAX_PAD_FONT) size = MAX_PAD_FONT;
+  const along = px;
+  const both = showNet && padNumber !== '';
+  let yOffNet = 0;
+  let yOffNum = 0;
+  if (both) {
+    size = size / 2.5;
+    yOffNet = size / 1.4; // net name sits below centre
+    yOffNum = size / 1.7; // pad number above centre
+  }
+  const Xscale = 0.9; // condense x for the stroke font
+  const rad = (-angle * Math.PI) / 180;
+  const sinA = Math.sin(rad);
+  const cosA = Math.cos(rad);
+  // A local +Y (down) offset maps to world (−dy·sin, dy·cos).
+  const anchor = (dy: number): Vec2 => ({ x: pad.at.x - dy * sinA, y: pad.at.y + dy * cosA });
+  const label = (text: string, at: Vec2, glyph: number): void => {
+    addText(scene.padText, {
+      kind: 'user',
+      text,
+      at,
+      angle,
+      layer: '',
+      size: { x: glyph * Xscale, y: glyph },
+      thickness: (glyph * Xscale) / 6,
+      bold: true,
+    } as PcbTextItem);
+  };
+
+  if (showNet) {
+    let tsize = Math.min((1.5 * along) / Math.max(netName.length + 1, 5), size);
+    tsize *= 0.85;
+    if (round) tsize *= 0.9;
+    const ty = Math.min(tsize * 1.4, yOffNet);
+    label(netName, anchor(ty), tsize);
+  }
+  if (padNumber !== '') {
+    let tsize = Math.min((1.5 * along) / Math.max(padNumber.length, 3), size);
+    tsize = Math.min(tsize * 0.85, size);
+    label(padNumber, anchor(-yOffNum), tsize);
+  }
+}
+
 export interface SceneFilter {
   /** Appearance>Objects "Footprints Front/Back": hide whole footprints per side. */
   hideFrontFootprints?: boolean;
@@ -745,27 +814,8 @@ export function buildScene(board: Board, filter: SceneFilter = {}): BoardScene {
         });
         addHole(scene.padHolesPlated, pad, pad.drill);
       }
-      // Pad number, centred on the pad and sized to fit it (KiCad draws the pad
-      // number on LAYER_PADS). Fit by the short side and the digit count so it
-      // stays inside the copper; oriented along the pad's longer axis.
-      if (pad.number && pad.number !== '') {
-        const short = Math.min(pad.size.x, pad.size.y);
-        const long = Math.max(pad.size.x, pad.size.y);
-        const n = pad.number.length;
-        const size = Math.min(short * 0.75, (long * 0.85) / Math.max(1, n * 0.7));
-        if (size > 0.05 * MM) {
-          const vertical = pad.size.y > pad.size.x * 1.2;
-          addText(scene.padText, {
-            kind: 'user',
-            text: pad.number,
-            at: pad.at,
-            angle: (pad.angle ?? 0) + (vertical ? 90 : 0),
-            layer: '',
-            size: { x: size, y: size },
-            thickness: Math.max(size * 0.12, 1),
-          } as PcbTextItem);
-        }
-      }
+      // Pad number + net name text (PCB_PAINTER::draw(PAD) netname layer).
+      addPadLabels(scene, pad, board.nets.get(pad.net ?? 0) ?? '');
       grow(pad.at.x, pad.at.y, Math.max(pad.size.x, pad.size.y) / 2);
     }
     grow(fp.at.x, fp.at.y);
