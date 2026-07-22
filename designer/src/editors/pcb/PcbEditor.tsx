@@ -36,6 +36,13 @@ import {
   deleteBoardItems,
   rotateBoardItems,
   duplicateBoardItems,
+  mirrorBoardItems,
+  groupBoardItems,
+  ungroupBoardItems,
+  expandGroupIds,
+  groupContaining,
+  setBoardItemsLocked,
+  isBoardItemLocked,
   serializeBoard,
   buildRatsnest,
   addBoardShape,
@@ -57,6 +64,7 @@ import {
 } from '@ziroeda/pcbnew';
 import { MenuBar, type Menu } from '../../ui/MenuBar.js';
 import { Toolbar } from '../../ui/Toolbar.js';
+import { DialogPcbFind, DEFAULT_PCB_FIND, type PcbFindOptions } from './dialogs/dialog_find.js';
 import {
   buildScene,
   buildDrawSteps,
@@ -584,6 +592,7 @@ export function PcbEditor({
   text,
   onExit,
   onShowSchematic,
+  onShowFootprintEditor,
   projectName,
   projectFiles,
 }: {
@@ -591,6 +600,8 @@ export function PcbEditor({
   text: string;
   onExit: () => void;
   onShowSchematic?: () => void;
+  /** Open the Footprint Editor (the top-toolbar button / Tools menu). */
+  onShowFootprintEditor?: () => void;
   /** Project name shown as "<project> — PCB Editor" in the menu bar. */
   projectName?: string;
   /** The open project's files (name + text) — lets the 3D viewer resolve
@@ -762,6 +773,15 @@ export function PcbEditor({
     dims: ClassDims;
   } | null>(null);
   // Pending "Add Text" dialog: where the text will be placed.
+  // Find dialog (DIALOG_FIND): query, options, hit cursor + status line.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findOpts, setFindOpts] = useState<PcbFindOptions>(DEFAULT_PCB_FIND);
+  const [findStatus, setFindStatus] = useState('');
+  const findHitsRef = useRef<{ id: string; pos: { x: number; y: number } }[]>([]);
+  const findCursorRef = useRef(-1);
+  // A query/options change restarts the search (DIALOG_FIND::search(true)).
+  const findDirtyRef = useRef(true);
   const [textDialog, setTextDialog] = useState<{ x: number; y: number } | null>(null);
   const [textDraft, setTextDraft] = useState('');
   // Pending "Copper Zone Properties" dialog: the zone's first corner.
@@ -1495,22 +1515,67 @@ export function PcbEditor({
 
   // Delete the selected items (EDIT_TOOL::Remove). Reads the live selection ref
   // so the keyboard shortcut and menu both act on the current selection.
+  // Deleting a group deletes its members too (the id set keeps the group id so
+  // the group node itself is dropped as well).
   const deleteSel = useCallback(() => {
     const brd = boardRef.current;
     const sel = selForDrawRef.current;
     if (!brd || sel.size === 0) return;
-    commitBoard(deleteBoardItems(brd, sel));
+    commitBoard(deleteBoardItems(brd, new Set([...sel, ...expandGroupIds(brd, sel)])));
     setSelection(new Set());
   }, [commitBoard]);
 
   // Rotate the selection ±90° about its centre (EDIT_TOOL::Rotate). Keeps the
-  // selection so it can be rotated repeatedly.
+  // selection so it can be rotated repeatedly. Groups rotate as their members.
   const rotateSel = useCallback(
     (ccw: boolean) => {
       const brd = boardRef.current;
       const sel = selForDrawRef.current;
       if (!brd || sel.size === 0) return;
-      commitBoard(rotateBoardItems(brd, sel, ccw));
+      commitBoard(rotateBoardItems(brd, expandGroupIds(brd, sel), ccw));
+    },
+    [commitBoard],
+  );
+
+  // Mirror the selection about its centre (EDIT_TOOL::Mirror; mirrorV = flip
+  // top/bottom, mirrorH = left/right). Footprints are skipped, like KiCad.
+  const mirrorSel = useCallback(
+    (direction: 'v' | 'h') => {
+      const brd = boardRef.current;
+      const sel = selForDrawRef.current;
+      if (!brd || sel.size === 0) return;
+      commitBoard(mirrorBoardItems(brd, expandGroupIds(brd, sel), direction));
+    },
+    [commitBoard],
+  );
+
+  // Group / ungroup the selection (ACTIONS::group / ungroup).
+  const groupSel = useCallback(() => {
+    const brd = boardRef.current;
+    const sel = selForDrawRef.current;
+    if (!brd || sel.size === 0) return;
+    const { board: next, id } = groupBoardItems(brd, sel);
+    if (!id) return;
+    commitBoard(next);
+    setSelection(new Set([id]));
+  }, [commitBoard]);
+  const ungroupSel = useCallback(() => {
+    const brd = boardRef.current;
+    const sel = selForDrawRef.current;
+    if (!brd || sel.size === 0) return;
+    // The members stay selected after dissolving their group, like KiCad.
+    const members = expandGroupIds(brd, sel);
+    commitBoard(ungroupBoardItems(brd, sel));
+    setSelection(members);
+  }, [commitBoard]);
+
+  // Lock / unlock the selection (PCB_ACTIONS::lock / unlock).
+  const lockSel = useCallback(
+    (locked: boolean) => {
+      const brd = boardRef.current;
+      const sel = selForDrawRef.current;
+      if (!brd || sel.size === 0) return;
+      commitBoard(setBoardItemsLocked(brd, sel, locked));
     },
     [commitBoard],
   );
@@ -1520,7 +1585,10 @@ export function PcbEditor({
     const brd = boardRef.current;
     const sel = selForDrawRef.current;
     if (!brd || sel.size === 0) return;
-    const { board: next, ids } = duplicateBoardItems(brd, sel, { x: MM, y: MM });
+    const { board: next, ids } = duplicateBoardItems(brd, expandGroupIds(brd, sel), {
+      x: MM,
+      y: MM,
+    });
     commitBoard(next);
     setSelection(new Set(ids));
   }, [commitBoard]);
@@ -1656,6 +1724,116 @@ export function PcbEditor({
   );
   const zoomToFit = useCallback(() => zoomToFitImpl(true), [zoomToFitImpl]);
   const zoomFitObjects = useCallback(() => zoomToFitImpl(false), [zoomToFitImpl]);
+
+  // DIALOG_FIND::search: collect hits in upstream order — footprint reference
+  // designators, footprint values, other text items (footprint text, board
+  // text, zone names), then net names — and walk the list with Find Next /
+  // Find Previous, wrapping when enabled. Each hit selects the item and
+  // centres the view on it (FocusOnLocation).
+  const runFind = useCallback(
+    (dir: 'next' | 'prev' | 'restart') => {
+      const brd = boardRef.current;
+      if (!brd) return;
+      const q = findQuery;
+      const matches = (s0: string): boolean => {
+        if (!q) return false;
+        const s = findOpts.matchCase ? s0 : s0.toLowerCase();
+        const needle = findOpts.matchCase ? q : q.toLowerCase();
+        if (findOpts.wildcard) {
+          const rx = new RegExp(
+            `^${needle
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+              .replace(/\*/g, '.*')
+              .replace(/\?/g, '.')}$`,
+          );
+          return rx.test(s);
+        }
+        if (findOpts.wholeWord) {
+          const rx = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+          return rx.test(s);
+        }
+        return s.includes(needle);
+      };
+
+      if (findDirtyRef.current || dir === 'restart') {
+        const hits: { id: string; pos: { x: number; y: number } }[] = [];
+        brd.footprints.forEach((fp, i) => {
+          const refIdx = fp.texts.findIndex((t) => t.kind === 'reference');
+          const valIdx = fp.texts.findIndex((t) => t.kind === 'value');
+          if (findOpts.includeReferences && matches(fp.reference ?? ''))
+            hits.push({
+              id: refIdx >= 0 ? boardItemId('fptext', i, refIdx) : boardItemId('footprint', i),
+              pos: refIdx >= 0 ? fp.texts[refIdx]!.at : fp.at,
+            });
+          if (findOpts.includeValues && matches(fp.value ?? ''))
+            hits.push({
+              id: valIdx >= 0 ? boardItemId('fptext', i, valIdx) : boardItemId('footprint', i),
+              pos: valIdx >= 0 ? fp.texts[valIdx]!.at : fp.at,
+            });
+          if (findOpts.includeTexts)
+            fp.texts.forEach((t, ti) => {
+              if (t.kind === 'user' && !t.hide && matches(t.text))
+                hits.push({ id: boardItemId('fptext', i, ti), pos: t.at });
+            });
+        });
+        if (findOpts.includeTexts) {
+          brd.texts.forEach((t, i) => {
+            if (matches(t.text)) hits.push({ id: boardItemId('text', i), pos: t.at });
+          });
+          brd.zones.forEach((z, i) => {
+            const p = z.outline?.[0] ?? z.fills[0]?.polys[0]?.[0];
+            if (z.netName && p && matches(z.netName))
+              hits.push({ id: boardItemId('zone', i), pos: p });
+          });
+        }
+        if (findOpts.includeNets) {
+          for (const [code, name] of brd.nets) {
+            if (code === 0 || !matches(name)) continue;
+            // Focus the first copper item carrying the net.
+            const t = brd.tracks.findIndex((x) => x.net === code);
+            if (t >= 0) {
+              hits.push({ id: boardItemId('track', t), pos: brd.tracks[t]!.start });
+              continue;
+            }
+            const v = brd.vias.findIndex((x) => x.net === code);
+            if (v >= 0) hits.push({ id: boardItemId('via', v), pos: brd.vias[v]!.at });
+          }
+        }
+        findHitsRef.current = hits;
+        findCursorRef.current = -1;
+        findDirtyRef.current = false;
+      }
+
+      const hits = findHitsRef.current;
+      if (hits.length === 0) {
+        setFindStatus(q ? `"${q}" not found` : '');
+        return;
+      }
+      let cur = findCursorRef.current;
+      if (dir === 'prev') cur -= 1;
+      else cur += 1;
+      if (findOpts.wrap) cur = ((cur % hits.length) + hits.length) % hits.length;
+      else cur = Math.max(0, Math.min(hits.length - 1, cur));
+      findCursorRef.current = cur;
+      const hit = hits[cur]!;
+      setFindStatus(`Hit(s): ${cur + 1} of ${hits.length}`);
+      setSelection(new Set([hit.id]));
+      // FocusOnLocation: centre the view on the hit at the current zoom.
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const v = viewRef.current;
+        const sx = v.flipX ? -v.scale : v.scale;
+        v.tx = canvas.width / 2 - hit.pos.x * sx;
+        v.ty = canvas.height / 2 - hit.pos.y * v.scale;
+        requestDraw();
+      }
+    },
+    [findQuery, findOpts, requestDraw],
+  );
+  // Query/options edits restart the search on the next Find.
+  useEffect(() => {
+    findDirtyRef.current = true;
+  }, [findQuery, findOpts]);
 
   // The TOP_AUX zoom selector: set an absolute zoom about the viewport centre.
   // The status bar Z indicator is scale·1000, so preset Z → scale Z/1000.
@@ -1818,6 +1996,10 @@ export function PcbEditor({
   const passesFilter = (id: string): boolean => {
     const r = parseBoardItemId(id);
     if (!r) return false;
+    // Locked items are selectable only with the "Locked items" filter checked
+    // (PCB_SELECTION_FILTER_OPTIONS::lockedItems; KiCad defaults it off).
+    const brd = boardRef.current;
+    if (brd && !selFilter.has('lockedItems') && isBoardItemLocked(brd, id)) return false;
     const key = filterKeyOf(r.kind);
     return key ? selFilter.has(key) : true;
   };
@@ -1826,18 +2008,25 @@ export function PcbEditor({
   // with exact hit distances, Selection Filter, then GuessSelectionCandidates
   // (slop pruning, the 1.5× coverage-area heuristic, active-layer preference),
   // all transcribed in boardHitCandidates. One id = unambiguous click; several
-  // = KiCad would pop the disambiguation menu.
+  // = KiCad would pop the disambiguation menu. Finally, a hit on a group
+  // member resolves to its top-level group (PCB_GROUP::TopLevelGroup).
   const hitCandidates = (w: { x: number; y: number }): string[] => {
     const brd = boardRef.current;
     if (!brd) return [];
     const canvas = canvasRef.current;
     const v = viewRef.current;
-    return boardHitCandidates(brd, w, tolOf(), {
+    const cands = boardHitCandidates(brd, w, tolOf(), {
       filter: passesFilter,
       activeLayer,
       visibleLayers: visible,
       viewportIU: canvas ? { w: canvas.width / v.scale, h: canvas.height / v.scale } : undefined,
     });
+    const out: string[] = [];
+    for (const id of cands) {
+      const resolved = groupContaining(brd, id) ?? id;
+      if (!out.includes(resolved)) out.push(resolved);
+    }
+    return out;
   };
 
   const tolOf = (): number => (5 * dpr) / viewRef.current.scale; // ~5px, like COLLECTORS_GUIDE
@@ -2234,12 +2423,14 @@ export function PcbEditor({
   // routing behind; 'drag' stretches the traces attached to moving footprints.
   // Splits the scene into a backdrop (everything else) + a live moving overlay.
   const beginMove = (
-    sel: ReadonlySet<string>,
+    sel0: ReadonlySet<string>,
     kind: 'move' | 'drag',
     origin: { x: number; y: number },
   ): void => {
     const brd = boardRef.current;
-    if (!brd || sel.size === 0) return;
+    if (!brd || sel0.size === 0) return;
+    // A grabbed group moves as its members (the move commands know items only).
+    const sel = expandGroupIds(brd, sel0);
     movingSelRef.current = sel;
     moveKindRef.current = kind;
     moveOriginRef.current = origin;
@@ -2621,6 +2812,11 @@ export function PcbEditor({
       if (mod && (e.key === 'y' || e.key === 'Y')) {
         e.preventDefault();
         redo();
+        return;
+      }
+      if (mod && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        setFindOpen(true);
         return;
       }
       if (mod && (e.key === 'd' || e.key === 'D')) {
@@ -3198,6 +3394,27 @@ export function PcbEditor({
       case 'rotateCW':
         rotateSel(false);
         break;
+      case 'mirrorV':
+        mirrorSel('v');
+        break;
+      case 'mirrorH':
+        mirrorSel('h');
+        break;
+      case 'group':
+        groupSel();
+        break;
+      case 'ungroup':
+        ungroupSel();
+        break;
+      case 'lock':
+        lockSel(true);
+        break;
+      case 'unlock':
+        lockSel(false);
+        break;
+      case 'find':
+        setFindOpen(true);
+        break;
       case 'zoomRedraw':
         sceneDirtyRef.current = true;
         requestDraw();
@@ -3218,6 +3435,9 @@ export function PcbEditor({
         // ACTIONS::zoomTool: drag a rectangle to zoom into it; reverts to the
         // selection tool after one use (handled on pointer-up).
         setActiveTool('zoomTool');
+        break;
+      case 'footprintEditor':
+        onShowFootprintEditor?.();
         break;
       case 'showEeschema':
         onShowSchematic?.();
@@ -3297,7 +3517,7 @@ export function PcbEditor({
           ],
         },
         { sep: true },
-        { label: 'Find', disabled: dis, shortcut: 'Ctrl+F' },
+        { label: 'Find', action: () => setFindOpen(true), shortcut: 'Ctrl+F' },
         { sep: true },
         { label: 'Global Deletions…', disabled: dis },
       ],
@@ -4720,6 +4940,18 @@ export function PcbEditor({
         </>
       )}
 
+      {findOpen && (
+        <DialogPcbFind
+          query={findQuery}
+          options={findOpts}
+          onQuery={setFindQuery}
+          onOptions={setFindOpts}
+          onFind={runFind}
+          onClose={() => setFindOpen(false)}
+          status={findStatus}
+        />
+      )}
+
       {/* EDA_DRAW_FRAME hosts a message panel above pcbnew's 8-field status bar. */}
       <div className="ze-msgpanel" data-testid="pcb-message-panel">
         {messagePanelItems.map((item) => (
@@ -4802,6 +5034,15 @@ function describeBoardItem(board: Board, id: string): string {
       const p = f?.pads[r.sub ?? 0];
       if (!p) return 'Pad';
       return `Pad ${p.number}${f?.reference ? ` of ${f.reference}` : ''} · ${net(p.net ?? 0)}`;
+    }
+    case 'group': {
+      const g = board.groups[r.index];
+      // EDA_GROUP::GetItemDescription: 'Group "<name>" with N members' /
+      // "Anonymous Group with N members".
+      if (!g) return 'Group';
+      return g.name
+        ? `Group "${g.name}" with ${g.members.length} members`
+        : `Anonymous Group with ${g.members.length} members`;
     }
   }
 }

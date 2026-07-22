@@ -461,6 +461,7 @@ export function App(): JSX.Element {
             text={pcbFile.text}
             onExit={goHome}
             onShowSchematic={hasSchematic ? showSchematic : undefined}
+            onShowFootprintEditor={showFootprintEditor}
             projectName={projectName}
             projectFiles={projectFiles ?? undefined}
           />
