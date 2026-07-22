@@ -92,6 +92,60 @@ describe('annotateSymbols', () => {
   });
 });
 
+describe('annotateSymbols — multi-unit sharing (REFDES_TRACKER::GetNextRefDesForUnits)', () => {
+  // A two-unit part: fresh unit A + unit B placed separately, plus a kept
+  // U1 unit A to join, and a different-value dual op-amp that must not share.
+  const multiSym = (ref: string, value: string, unit: number, x: number, uuid: string): string => `
+  (symbol (lib_id "Amp:Dual") (at ${x} 50 0) (unit ${unit}) (uuid "${uuid}")
+    (property "Reference" "${ref}" (at ${x} 50 0))
+    (property "Value" "${value}" (at ${x} 50 0)))`;
+
+  const MULTI_SCH = `(kicad_sch (version 20231120) (generator "test") (paper "A4")
+    (lib_symbols
+      (symbol "Amp:Dual" (property "Reference" "U" (at 0 0 0))
+        (symbol "Dual_1_1") (symbol "Dual_2_1")))
+    ${multiSym('U1', 'TL072', 1, 10, 'm-kept')}
+    ${multiSym('U?', 'TL072', 2, 20, 'm-b')}
+    ${multiSym('U?', 'TL072', 1, 30, 'm-a2')}
+    ${multiSym('U?', 'NE5532', 1, 40, 'm-other')}
+  )`;
+
+  const doc = readSchematic(parse(MULTI_SCH));
+  const libById = new Map(doc.libSymbols.map((l) => [l.libId, l]));
+
+  it('fresh units fill free unit slots of a same-lib same-value number', () => {
+    const next = annotateSymbols(doc, libById, opts({ resetExisting: false, order: 'x' }));
+    // Unit 2 joins the kept U1 (unit 1 taken, unit 2 free).
+    expect(refOf(next.find((s) => s.uuid === 'm-b')!)).toBe('U1');
+    // A second unit 1 cannot join U1 (slot taken) → first fully-free number
+    // for unit 1 is U2.
+    expect(refOf(next.find((s) => s.uuid === 'm-a2')!)).toBe('U2');
+    // A different value must not share U2's number even though unit 2 is free.
+    expect(refOf(next.find((s) => s.uuid === 'm-other')!)).toBe('U3');
+    expect(refOf(next.find((s) => s.uuid === 'm-kept')!)).toBe('U1');
+  });
+
+  it('reset keeps units that shared a reference together', () => {
+    const SHARED = `(kicad_sch (version 20231120) (generator "test") (paper "A4")
+      (lib_symbols
+        (symbol "Amp:Dual" (property "Reference" "U" (at 0 0 0))
+          (symbol "Dual_1_1") (symbol "Dual_2_1")))
+      ${multiSym('U7', 'TL072', 1, 10, 's-a')}
+      ${multiSym('U7', 'TL072', 2, 90, 's-b')}
+      ${multiSym('U3', 'TL072', 1, 50, 's-solo')}
+    )`;
+    const sdoc = readSchematic(parse(SHARED));
+    const slib = new Map(sdoc.libSymbols.map((l) => [l.libId, l]));
+    const next = annotateSymbols(sdoc, slib, opts({ resetExisting: true, order: 'x' }));
+    // The U7 pair stays paired on one number despite s-solo sitting between
+    // them in X order.
+    const a = refOf(next.find((s) => s.uuid === 's-a')!);
+    const b = refOf(next.find((s) => s.uuid === 's-b')!);
+    expect(a).toBe(b);
+    expect(refOf(next.find((s) => s.uuid === 's-solo')!)).not.toBe(a);
+  });
+});
+
 describe('clearAnnotationCommand', () => {
   const doc = readSchematic(parse(SCH));
   it('resets references to prefix + ? and leaves power symbols', () => {
