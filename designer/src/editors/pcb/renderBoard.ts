@@ -84,6 +84,9 @@ export interface PcbDrawOptions {
   contrastMode: 'normal' | 'dim' | 'hide';
   /** The active layer, exempt from contrast dimming. */
   activeLayer?: string;
+  /** Paint every layer in this color — the net-color overlay pass
+   *  (net colors mode "All": copper items tinted with their net's color). */
+  colorOverride?: string;
 }
 
 /** KiCad defaults (project_local_settings.cpp + s_objectSettings). */
@@ -1075,7 +1078,8 @@ export function buildDrawSteps(
 ): (() => void)[] {
   const steps: (() => void)[] = [];
   // Per-layer color, brightened toward white for a selection overlay.
-  const col = (layer: string): string => brightenColor(layerColor(layer), brighten);
+  const col = (layer: string): string =>
+    opts.colorOverride ?? brightenColor(layerColor(layer), brighten);
   const sp = (c: string): string => brightenColor(c, brighten);
   steps.push(() => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);

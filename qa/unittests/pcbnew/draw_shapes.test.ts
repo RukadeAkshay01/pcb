@@ -1,0 +1,82 @@
+import { describe, it, expect } from 'vitest';
+import { parse } from '@ziroeda/sexpr/src/index.js';
+import { readBoard } from '@ziroeda/pcbnew/src/read-board.js';
+import { serializeBoard } from '@ziroeda/pcbnew/src/write-board.js';
+import { addBoardShape } from '@ziroeda/pcbnew/src/edit-board.js';
+import { mmToIU } from '@ziroeda/common/src/eda_units.js';
+import type { Board } from '@ziroeda/pcbnew/src/types.js';
+
+const MIN_BOARD = `(kicad_pcb (version 20241229) (generator "test")
+  (layers (0 "F.Cu" signal) (31 "B.Cu" signal) (44 "Edge.Cuts" user) (39 "F.SilkS" user "F.Silkscreen"))
+  (net 0 "")
+)`;
+
+const mk = (): Board => readBoard(parse(MIN_BOARD));
+
+describe('addBoardShape (DRAWING_TOOL commits)', () => {
+  it('adds a line and round-trips it through the writer', () => {
+    const { board, id } = addBoardShape(mk(), {
+      kind: 'line',
+      start: { x: 0, y: 0 },
+      end: { x: mmToIU(10), y: 0 },
+      width: mmToIU(0.05),
+      fill: false,
+      layer: 'Edge.Cuts',
+    });
+    expect(id).toBe('shape:0');
+    const text = serializeBoard(board);
+    expect(text).toContain('gr_line');
+    const back = readBoard(parse(text));
+    expect(back.shapes).toHaveLength(1);
+    expect(back.shapes[0]!.kind).toBe('line');
+    expect(back.shapes[0]!.layer).toBe('Edge.Cuts');
+    expect(back.shapes[0]!.end!.x).toBe(mmToIU(10));
+    expect(back.shapes[0]!.width).toBe(mmToIU(0.05));
+  });
+
+  it('round-trips rect, circle, arc and polygon', () => {
+    let b = mk();
+    b = addBoardShape(b, {
+      kind: 'rect',
+      start: { x: 0, y: 0 },
+      end: { x: mmToIU(5), y: mmToIU(4) },
+      width: mmToIU(0.1),
+      fill: false,
+      layer: 'F.SilkS',
+    }).board;
+    b = addBoardShape(b, {
+      kind: 'circle',
+      center: { x: mmToIU(2), y: mmToIU(2) },
+      end: { x: mmToIU(4), y: mmToIU(2) },
+      width: mmToIU(0.1),
+      fill: false,
+      layer: 'F.SilkS',
+    }).board;
+    b = addBoardShape(b, {
+      kind: 'arc',
+      start: { x: 0, y: 0 },
+      mid: { x: mmToIU(1), y: mmToIU(1) },
+      end: { x: mmToIU(2), y: 0 },
+      width: mmToIU(0.1),
+      fill: false,
+      layer: 'F.SilkS',
+    }).board;
+    b = addBoardShape(b, {
+      kind: 'poly',
+      pts: [
+        { x: 0, y: 0 },
+        { x: mmToIU(3), y: 0 },
+        { x: mmToIU(3), y: mmToIU(3) },
+      ],
+      width: mmToIU(0.1),
+      fill: false,
+      layer: 'F.SilkS',
+    }).board;
+
+    const back = readBoard(parse(serializeBoard(b)));
+    expect(back.shapes.map((s) => s.kind)).toEqual(['rect', 'circle', 'arc', 'poly']);
+    expect(back.shapes[1]!.center).toEqual({ x: mmToIU(2), y: mmToIU(2) });
+    expect(back.shapes[2]!.mid).toEqual({ x: mmToIU(1), y: mmToIU(1) });
+    expect(back.shapes[3]!.pts).toHaveLength(3);
+  });
+});

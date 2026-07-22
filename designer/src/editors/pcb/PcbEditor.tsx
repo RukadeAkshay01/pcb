@@ -28,9 +28,13 @@ import {
   rotateBoardItems,
   duplicateBoardItems,
   serializeBoard,
+  buildRatsnest,
+  addBoardShape,
+  type RatsnestEdge,
   type Board,
   type BoardItemKind,
   type PcbFootprint,
+  type PcbShape,
 } from '@ziroeda/pcbnew';
 import { MenuBar, type Menu } from '../../ui/MenuBar.js';
 import { Toolbar } from '../../ui/Toolbar.js';
@@ -46,7 +50,13 @@ import {
   type SheetInfo,
 } from './renderBoard.js';
 import type { Viewer3D } from './pcb3d.js';
-import { layerColor, PCB_PAINT_ORDER, PCB_CURSOR, PCB_OBJECT_COLORS } from './pcbTheme.js';
+import {
+  layerColor,
+  PCB_PAINT_ORDER,
+  PCB_CURSOR,
+  PCB_OBJECT_COLORS,
+  PCB_SPECIAL,
+} from './pcbTheme.js';
 import {
   PCB_TOP_TOOLBAR,
   PCB_LEFT_TOOLBAR,
@@ -82,6 +92,70 @@ const EYE_ICONS = import.meta.glob('../assets/toolbar/visibility*.svg', {
 const eyeUrl = (on: boolean): string | undefined =>
   EYE_ICONS[`../assets/toolbar/visibility${on ? '' : '_off'}.svg`];
 
+// The graphic-shape drawing tools (DRAWING_TOOL) and the PcbShape kind each
+// one creates.
+const DRAW_SHAPE_TOOLS: Record<string, PcbShape['kind']> = {
+  drawLine: 'line',
+  drawArc: 'arc',
+  drawRectangle: 'rect',
+  drawCircle: 'circle',
+  drawPolygon: 'poly',
+};
+
+// Default graphic line widths per layer class, in IU
+// (board_design_settings.h DEFAULT_*_WIDTH, in mm).
+const defaultShapeWidth = (layer: string): number => {
+  if (/\.SilkS$/.test(layer)) return 0.1 * MM;
+  if (/\.Cu$/.test(layer)) return 0.2 * MM;
+  if (layer === 'Edge.Cuts' || /\.CrtYd$/.test(layer)) return 0.05 * MM;
+  return 0.1 * MM;
+};
+
+// Circumcenter of three points, or null when they are (nearly) collinear.
+const circumcenter = (
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+): { x: number; y: number } | null => {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-3) return null;
+  const a2 = a.x * a.x + a.y * a.y;
+  const b2 = b.x * b.x + b.y * b.y;
+  const c2 = c.x * c.x + c.y * c.y;
+  return {
+    x: (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+    y: (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d,
+  };
+};
+
+// Trace the arc through start→mid→end on the 2D context (world coords).
+const traceArc3 = (
+  ctx: CanvasRenderingContext2D,
+  s: { x: number; y: number },
+  m: { x: number; y: number },
+  e: { x: number; y: number },
+): void => {
+  const o = circumcenter(s, m, e);
+  if (!o) {
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(e.x, e.y);
+    return;
+  }
+  const r = Math.hypot(s.x - o.x, s.y - o.y);
+  const a0 = Math.atan2(s.y - o.y, s.x - o.x);
+  const a1 = Math.atan2(m.y - o.y, m.x - o.x);
+  const a2 = Math.atan2(e.y - o.y, e.x - o.x);
+  // Pick the sweep direction that passes through the mid point.
+  const ccwSpan = (from: number, to: number): number => {
+    let d = from - to;
+    while (d < 0) d += Math.PI * 2;
+    return d;
+  };
+  const ccw = ccwSpan(a0, a1) <= ccwSpan(a0, a2);
+  ctx.moveTo(s.x, s.y);
+  ctx.arc(o.x, o.y, r, a0, a2, ccw);
+};
+
 // Left-toolbar radio groups (same convention as the schematic editor).
 const RADIO_GROUPS: string[][] = [
   ['unitsMm', 'unitsInches', 'unitsMils'],
@@ -94,7 +168,6 @@ const DEFAULT_TOGGLES = new Set([
   'unitsMm',
   'crosshairSmall',
   'lineMode90',
-  'showRatsnest',
   'ratsnestLineMode',
   'zoneDisplayFilled',
   'showLayersManager',
@@ -147,7 +220,6 @@ const OBJECT_ROWS: ObjectRow[] = [
     key: 'ratsnest',
     label: 'Ratsnest',
     tooltip: 'Show unconnected nets as a ratsnest',
-    disabled: true,
   },
   {
     key: 'drcWarnings',
@@ -303,6 +375,70 @@ const layerTooltip = (name: string): string => {
   return '';
 };
 
+// User-facing layer names, as the Appearance panel shows them (LayerName() in
+// layer_id.cpp: F.Adhesive, User.Drawings… — not the file's canonical tokens).
+const LAYER_DISPLAY_NAMES: Record<string, string> = {
+  'F.Adhes': 'F.Adhesive',
+  'B.Adhes': 'B.Adhesive',
+  'F.SilkS': 'F.Silkscreen',
+  'B.SilkS': 'B.Silkscreen',
+  'Dwgs.User': 'User.Drawings',
+  'Cmts.User': 'User.Comments',
+  'Eco1.User': 'User.Eco1',
+  'Eco2.User': 'User.Eco2',
+  'F.CrtYd': 'F.Courtyard',
+  'B.CrtYd': 'B.Courtyard',
+};
+
+// Wildcard match for netclass_patterns ('*' and '?', like EDA_COMBINED_MATCHER).
+const wildcardMatch = (pattern: string, s: string): boolean => {
+  const rx = new RegExp(
+    `^${pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.')}$`,
+    'i',
+  );
+  return rx.test(s);
+};
+
+/** Net classes from the project file (net_settings in .kicad_pro). */
+function parseNetclasses(files?: { name: string; text: string }[]): {
+  classes: string[];
+  classColors: Map<string, string>;
+  patterns: { netclass: string; pattern: string }[];
+} {
+  const out = {
+    classes: ['Default'],
+    classColors: new Map<string, string>(),
+    patterns: [] as { netclass: string; pattern: string }[],
+  };
+  const pro = files?.find((f) => f.name.endsWith('.kicad_pro'));
+  if (!pro) return out;
+  try {
+    const json = JSON.parse(pro.text) as {
+      net_settings?: {
+        classes?: { name?: string; pcb_color?: string }[];
+        netclass_patterns?: { netclass?: string; pattern?: string }[];
+      };
+    };
+    const ns = json.net_settings;
+    for (const c of ns?.classes ?? []) {
+      if (!c.name) continue;
+      if (!out.classes.includes(c.name)) out.classes.push(c.name);
+      // "rgb(0, 0, 0)"/alpha 0 means unset in the project file.
+      if (c.pcb_color && !/rgba?\(\s*0,\s*0,\s*0,?\s*0(\.0+)?\s*\)/.test(c.pcb_color))
+        out.classColors.set(c.name, c.pcb_color);
+    }
+    for (const p of ns?.netclass_patterns ?? []) {
+      if (p.netclass && p.pattern) out.patterns.push({ netclass: p.netclass, pattern: p.pattern });
+    }
+  } catch {
+    // Malformed project file: fall back to Default only.
+  }
+  return out;
+}
+
 // Builtin layer presets (appearance_controls.cpp preset* + common/lset.cpp masks).
 const FRONT_TECH = ['F.SilkS', 'F.Mask', 'F.Adhes', 'F.Paste', 'F.CrtYd', 'F.Fab'];
 const BACK_TECH = ['B.SilkS', 'B.Mask', 'B.Adhes', 'B.Paste', 'B.CrtYd', 'B.Fab'];
@@ -348,7 +484,9 @@ export function PcbEditor({
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<ReadonlySet<string>>(new Set());
   const [activeLayer, setActiveLayer] = useState('F.Cu');
-  const [preset, setPreset] = useState('All Layers');
+  // Selected layer preset; '---' is the separator row, the default selection
+  // like rebuildLayerPresetsWidget.
+  const [preset, setPreset] = useState('---');
   const [tab, setTab] = useState<'Layers' | 'Objects' | 'Nets'>('Layers');
   const [toggles, setToggles] = useState<Set<string>>(new Set(DEFAULT_TOGGLES));
   // Properties pane width. KiCad's PCB_PROPERTIES_PANEL docks at BestSize 300,
@@ -374,6 +512,17 @@ export function PcbEditor({
   const [viewportSel, setViewportSel] = useState('---');
   // "Delete preset/viewport..." chooser popup.
   const [deleteChooser, setDeleteChooser] = useState<'presets' | 'viewports' | null>(null);
+  // Nets tab state: per-net / per-class colors, ratsnest visibility, and the
+  // Net Display Options modes (appearance_controls.cpp net display pane).
+  const [netColors, setNetColors] = useState<ReadonlyMap<number, string>>(new Map());
+  const [hiddenNets, setHiddenNets] = useState<ReadonlySet<number>>(new Set());
+  const [classColors, setClassColors] = useState<ReadonlyMap<string, string>>(new Map());
+  const [hiddenClasses, setHiddenClasses] = useState<ReadonlySet<string>>(new Set());
+  const [netColorMode, setNetColorMode] = useState<'all' | 'ratsnest' | 'off'>('ratsnest');
+  const [ratsnestMode, setRatsnestMode] = useState<'all' | 'visible' | 'off'>('all');
+  const [netOptsOpen, setNetOptsOpen] = useState(false);
+  // Footprints whose local ratsnest is forced on (PCB_ACTIONS::localRatsnestTool).
+  const [localRats, setLocalRats] = useState<ReadonlySet<number>>(new Set());
   const [selFilter, setSelFilter] = useState<Set<string>>(
     new Set(PCB_FILTER_CATS.map((c) => c.key)),
   );
@@ -450,6 +599,16 @@ export function PcbEditor({
   // Mirror of the active right-toolbar tool for the pointer/Escape handlers.
   const activeToolRef = useRef('selectSetRect');
   activeToolRef.current = activeTool;
+  // Leaving the local ratsnest tool clears the forced-on set, like upstream.
+  useEffect(() => {
+    if (activeTool !== 'localRatsnestTool') setLocalRats(new Set());
+  }, [activeTool]);
+  // In-flight graphic shape (DRAWING_TOOL): the points clicked so far.
+  const drawingRef = useRef<{ x: number; y: number }[]>([]);
+  // Switching tools abandons the in-flight shape.
+  useEffect(() => {
+    drawingRef.current = [];
+  }, [activeTool]);
   const sceneRef = useRef<BoardScene | null>(null);
   const rafRef = useRef(0);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -490,8 +649,10 @@ export function PcbEditor({
     const s = new Set(toggles);
     if (contrast !== 'normal') s.add('highContrast');
     else s.delete('highContrast');
+    if (objects.ratsnest) s.add('showRatsnest');
+    else s.delete('showRatsnest');
     return s;
-  }, [toggles, contrast]);
+  }, [toggles, contrast, objects.ratsnest]);
 
   // Parse after the first paint so "Loading…" is visible for big boards.
   useEffect(() => {
@@ -638,6 +799,53 @@ export function PcbEditor({
       ctx.imageSmoothingEnabled = true;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
+    // Net-color overlay (net colors mode "All"): copper items of colored nets
+    // repainted in their net color over the raster.
+    for (const cs of coloredScenesRef.current) {
+      ctx.save();
+      drawBoard(
+        ctx,
+        cs.scene,
+        v,
+        visible,
+        canvas.width,
+        canvas.height,
+        { ...drawOpts, colorOverride: cs.color },
+        undefined,
+        true,
+      );
+      ctx.restore();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    // Ratsnest airwires (RATSNEST_VIEW_ITEM): thin lines over the copper,
+    // curved when the left toolbar's curved-ratsnest mode is on.
+    {
+      const rats = ratsDrawRef.current;
+      if (rats.length > 0) {
+        const curved = toggles.has('ratsnestLineMode');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.lineWidth = Math.max(1, dpr);
+        for (const { e, color } of rats) {
+          const x1 = e.ax * v.scale + v.tx;
+          const y1 = e.ay * v.scale + v.ty;
+          const x2 = e.bx * v.scale + v.tx;
+          const y2 = e.by * v.scale + v.ty;
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          if (curved) {
+            // Bow the line ~15% of its length to the side, like the curved
+            // ratsnest render.
+            const mx = (x1 + x2) / 2 - (y2 - y1) * 0.15;
+            const my = (y1 + y2) / 2 + (x2 - x1) * 0.15;
+            ctx.quadraticCurveTo(mx, my, x2, y2);
+          } else {
+            ctx.lineTo(x2, y2);
+          }
+          ctx.stroke();
+        }
+      }
+    }
     // Selection / move overlay: the selected items repainted brightened over the
     // raster — KiCad draws a selected item in its layer colour Brightened(0.8),
     // not a bounding box (pcb_painter.cpp getColor). While a move is in flight the
@@ -669,6 +877,70 @@ export function PcbEditor({
           true,
           SELECT_BRIGHTEN,
         );
+        ctx.restore();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+    }
+    // In-flight drawing preview (DRAWING_TOOL's live outline): the committed
+    // points plus the snapped cursor, stroked in the active layer's color at
+    // the layer's default line width.
+    {
+      const kind = DRAW_SHAPE_TOOLS[activeToolRef.current];
+      const pts = drawingRef.current;
+      const cur0 = cursorRef.current;
+      if (kind && pts.length > 0 && cur0) {
+        const p = snapToGrid(cur0);
+        ctx.save();
+        ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty);
+        ctx.strokeStyle = layerColor(activeLayer);
+        ctx.lineWidth = defaultShapeWidth(activeLayer);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        switch (kind) {
+          case 'line': {
+            const end = constrainLineEnd(pts[0]!, p);
+            ctx.moveTo(pts[0]!.x, pts[0]!.y);
+            ctx.lineTo(end.x, end.y);
+            break;
+          }
+          case 'rect': {
+            const a = pts[0]!;
+            ctx.rect(
+              Math.min(a.x, p.x),
+              Math.min(a.y, p.y),
+              Math.abs(p.x - a.x),
+              Math.abs(p.y - a.y),
+            );
+            break;
+          }
+          case 'circle': {
+            const a = pts[0]!;
+            const r = Math.hypot(p.x - a.x, p.y - a.y);
+            ctx.moveTo(a.x + r, a.y);
+            ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
+            break;
+          }
+          case 'arc': {
+            if (pts.length === 1) {
+              ctx.moveTo(pts[0]!.x, pts[0]!.y);
+              ctx.lineTo(p.x, p.y);
+            } else {
+              traceArc3(ctx, pts[0]!, p, pts[1]!);
+            }
+            break;
+          }
+          case 'poly': {
+            ctx.moveTo(pts[0]!.x, pts[0]!.y);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+            ctx.lineTo(p.x, p.y);
+            break;
+          }
+          default:
+            break;
+        }
+        ctx.stroke();
         ctx.restore();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       }
@@ -757,6 +1029,9 @@ export function PcbEditor({
     cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(draw);
   }, [draw]);
+  // Ref mirror so long-lived handlers (global keydown) never call a stale draw.
+  const requestDrawRef = useRef(requestDraw);
+  requestDrawRef.current = requestDraw;
 
   // Layer/object changes invalidate the raster.
   useEffect(() => {
@@ -1086,6 +1361,105 @@ export function PcbEditor({
     setDisambig({ x: clientX, y: clientY, ids: cands, additive });
   };
 
+  // ----- graphic shape drawing (DRAWING_TOOL) ---------------------------------
+
+  // Constrain a line segment's end per the left-toolbar line mode: 90 snaps to
+  // the nearer axis, 45 to the nearest 45° multiple, free leaves it alone.
+  const constrainLineEnd = (
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): { x: number; y: number } => {
+    if (toggles.has('lineModeFree')) return to;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (toggles.has('lineMode90'))
+      return Math.abs(dx) >= Math.abs(dy) ? { x: to.x, y: from.y } : { x: from.x, y: to.y };
+    // 45°: project onto the nearest multiple of 45°.
+    const ang = (Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI) / 4;
+    const len = Math.abs(Math.cos(ang)) > 0.5 ? dx / Math.cos(ang) : dy / Math.sin(ang);
+    return snapToGrid({ x: from.x + len * Math.cos(ang), y: from.y + len * Math.sin(ang) });
+  };
+
+  // One left click of an active drawing tool (DRAWING_TOOL::drawShape's click
+  // sequence). Returns having updated the in-flight point list or committed a
+  // finished shape to the board.
+  const handleDrawClick = (world: { x: number; y: number }): void => {
+    const kind = DRAW_SHAPE_TOOLS[activeToolRef.current];
+    const brd = boardRef.current;
+    if (!kind || !brd) return;
+    const pts = drawingRef.current;
+    const p = snapToGrid(world);
+    const same = (a: { x: number; y: number }, b: { x: number; y: number }): boolean =>
+      a.x === b.x && a.y === b.y;
+    // Commit leaves the new shape unselected and the tool active, like
+    // DRAWING_TOOL (draw the next shape right away).
+    const commit = (shape: Omit<PcbShape, 'source'>): void => {
+      commitBoard(addBoardShape(brd, shape).board);
+    };
+    const width = defaultShapeWidth(activeLayer);
+    const base = { width, fill: false, layer: activeLayer } as const;
+
+    switch (kind) {
+      case 'line': {
+        if (pts.length === 0) {
+          drawingRef.current = [p];
+        } else {
+          const start = pts[0]!;
+          const end = constrainLineEnd(start, p);
+          if (same(start, end)) {
+            // Clicking in place ends the chain.
+            drawingRef.current = [];
+          } else {
+            commit({ kind: 'line', start, end, ...base });
+            // Chain: the next segment starts where this one ended.
+            drawingRef.current = [end];
+          }
+        }
+        break;
+      }
+      case 'rect': {
+        if (pts.length === 0) drawingRef.current = [p];
+        else if (!same(pts[0]!, p)) {
+          commit({ kind: 'rect', start: pts[0]!, end: p, ...base });
+          drawingRef.current = [];
+        }
+        break;
+      }
+      case 'circle': {
+        if (pts.length === 0) drawingRef.current = [p];
+        else if (!same(pts[0]!, p)) {
+          commit({ kind: 'circle', center: pts[0]!, end: p, ...base });
+          drawingRef.current = [];
+        }
+        break;
+      }
+      case 'arc': {
+        // Clicks: start, end, then the curvature point (the arc's mid).
+        if (pts.length < 2) {
+          if (pts.length === 0 || !same(pts[pts.length - 1]!, p)) drawingRef.current = [...pts, p];
+        } else {
+          commit({ kind: 'arc', start: pts[0]!, mid: p, end: pts[1]!, ...base });
+          drawingRef.current = [];
+        }
+        break;
+      }
+      case 'poly': {
+        const tol = tolOf();
+        const closeToFirst = pts.length >= 3 && Math.hypot(p.x - pts[0]!.x, p.y - pts[0]!.y) <= tol;
+        if (closeToFirst || (pts.length >= 3 && same(pts[pts.length - 1]!, p))) {
+          commit({ kind: 'poly', pts: [...pts], ...base });
+          drawingRef.current = [];
+        } else if (pts.length === 0 || !same(pts[pts.length - 1]!, p)) {
+          drawingRef.current = [...pts, p];
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    requestDraw();
+  };
+
   // ----- interactive move / drag (EDIT_TOOL Move vs Drag) ---------------------
 
   const sceneFilter = (): { hideFrontFootprints: boolean; hideBackFootprints: boolean } => ({
@@ -1255,8 +1629,14 @@ export function PcbEditor({
     const d = downRef.current;
     if (d) {
       if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 3 * dpr) d.moved = true;
-      // The delete tool acts on clicks only — no drag-move or box select.
-      if (activeToolRef.current === 'deleteTool') return;
+      // Click-driven tools (delete, local ratsnest, drawing) take no
+      // drag-move or box-select gestures.
+      if (
+        activeToolRef.current === 'deleteTool' ||
+        activeToolRef.current === 'localRatsnestTool' ||
+        DRAW_SHAPE_TOOLS[activeToolRef.current]
+      )
+        return;
       if (d.moved && d.world) {
         const cur = worldAt(e.clientX, e.clientY);
         if (!cur) return;
@@ -1305,6 +1685,27 @@ export function PcbEditor({
               setSelection(new Set());
             }
           }
+        } else if (activeToolRef.current === 'localRatsnestTool') {
+          // PCB_ACTIONS::localRatsnestTool: clicking a footprint toggles its
+          // ratsnest on while the global ratsnest is hidden.
+          const w = worldAt(e.clientX, e.clientY);
+          const brd = boardRef.current;
+          if (w && brd) {
+            const fpHit = boardHitCandidates(brd, w, tolOf())
+              .map((id) => parseBoardItemId(id))
+              .find((r) => r?.kind === 'footprint');
+            if (fpHit) {
+              setLocalRats((prev) => {
+                const next = new Set(prev);
+                if (next.has(fpHit.index)) next.delete(fpHit.index);
+                else next.add(fpHit.index);
+                return next;
+              });
+            }
+          }
+        } else if (DRAW_SHAPE_TOOLS[activeToolRef.current]) {
+          const w = worldAt(e.clientX, e.clientY);
+          if (w) handleDrawClick(w);
         } else {
           clickSelect(e.clientX, e.clientY, d.shift);
         }
@@ -1398,6 +1799,10 @@ export function PcbEditor({
         if (disambigRef.current) {
           hoverRef.current = null;
           setDisambig(null);
+        } else if (drawingRef.current.length > 0) {
+          // First Esc abandons the in-flight shape; the tool stays active.
+          drawingRef.current = [];
+          requestDrawRef.current();
         } else if (activeToolRef.current !== 'selectSetRect') {
           // Esc in a tool returns to the selection tool (TOOL_MANAGER).
           setActiveTool('selectSetRect');
@@ -1597,6 +2002,106 @@ export function PcbEditor({
       .sort((a, b) => a[1].localeCompare(b[1]));
   }, [board, netQuery]);
 
+  // ----- ratsnest + net classes ----------------------------------------------
+
+  const netclassInfo = useMemo(() => parseNetclasses(projectFiles), [projectFiles]);
+  // net code -> net class name, via the project's netclass_patterns.
+  const netClassOf = useMemo(() => {
+    const m = new Map<number, string>();
+    if (board) {
+      for (const [code, name] of board.nets) {
+        const hit = netclassInfo.patterns.find((p) => wildcardMatch(p.pattern, name));
+        m.set(code, hit?.netclass ?? 'Default');
+      }
+    }
+    return m;
+  }, [board, netclassInfo]);
+  const classColorOf = useCallback(
+    (cls: string): string | undefined => classColors.get(cls) ?? netclassInfo.classColors.get(cls),
+    [classColors, netclassInfo],
+  );
+
+  // The airwires (CONNECTIVITY_DATA::GetRatsnest), recomputed on every edit.
+  const ratsnestEdges = useMemo(() => (board ? buildRatsnest(board) : []), [board]);
+
+  // Airwires filtered/colored for display, kept in a ref for the draw pass.
+  const ratsDrawRef = useRef<{ e: RatsnestEdge; color: string }[]>([]);
+  useEffect(() => {
+    const brd = boardRef.current;
+    const list: { e: RatsnestEdge; color: string }[] = [];
+    if (brd) {
+      const anyCuVisible = [...visible].some((l) => /\.Cu$/.test(l));
+      const layerOn = (l: string): boolean => (l === 'through' ? anyCuVisible : visible.has(l));
+      const localNets = new Set<number>();
+      for (const fi of localRats) {
+        const fp = brd.footprints[fi];
+        if (fp) for (const pad of fp.pads) if (pad.net && pad.net > 0) localNets.add(pad.net);
+      }
+      const globalOn = objects.ratsnest && ratsnestMode !== 'off';
+      for (const e of ratsnestEdges) {
+        const isLocal = localNets.has(e.net);
+        if (!globalOn && !isLocal) continue;
+        const cls = netClassOf.get(e.net) ?? 'Default';
+        if (!isLocal) {
+          if (hiddenNets.has(e.net) || hiddenClasses.has(cls)) continue;
+          if (ratsnestMode === 'visible' && !layerOn(e.aLayer) && !layerOn(e.bLayer)) continue;
+        }
+        let color: string = PCB_SPECIAL.ratsnest;
+        if (netColorMode !== 'off') color = netColors.get(e.net) ?? classColorOf(cls) ?? color;
+        list.push({ e, color });
+      }
+    }
+    ratsDrawRef.current = list;
+    requestDraw();
+  }, [
+    ratsnestEdges,
+    objects.ratsnest,
+    ratsnestMode,
+    hiddenNets,
+    hiddenClasses,
+    netColors,
+    netColorMode,
+    classColorOf,
+    netClassOf,
+    visible,
+    localRats,
+    requestDraw,
+  ]);
+
+  // Net colors mode "All": copper items of explicitly-colored nets get an
+  // overlay tint (tracks/arcs/vias/zones; pads keep their layer color for now).
+  const coloredScenesRef = useRef<{ color: string; scene: BoardScene }[]>([]);
+  useEffect(() => {
+    const brd = boardRef.current;
+    const list: { color: string; scene: BoardScene }[] = [];
+    if (brd && netColorMode === 'all') {
+      const colorFor = new Map<number, string>();
+      for (const [code] of brd.nets) {
+        if (code === 0) continue;
+        const c = netColors.get(code) ?? classColorOf(netClassOf.get(code) ?? 'Default');
+        if (c) colorFor.set(code, c);
+      }
+      for (const [net, color] of colorFor) {
+        const ids = new Set<string>();
+        brd.tracks.forEach((t, i) => {
+          if (t.net === net) ids.add(boardItemId('track', i));
+        });
+        brd.arcs.forEach((a, i) => {
+          if (a.net === net) ids.add(boardItemId('arc', i));
+        });
+        brd.vias.forEach((vv, i) => {
+          if (vv.net === net) ids.add(boardItemId('via', i));
+        });
+        brd.zones.forEach((z, i) => {
+          if (z.net === net) ids.add(boardItemId('zone', i));
+        });
+        if (ids.size > 0) list.push({ color, scene: buildScene(subsetBoardItems(brd, ids)) });
+      }
+    }
+    coloredScenesRef.current = list;
+    requestDraw();
+  }, [board, netColorMode, netColors, classColorOf, netClassOf, requestDraw]);
+
   // ----- toolbar handlers -----------------------------------------------------
 
   // Drag the splitter on the Properties pane's right edge (KiCad's resizable
@@ -1636,6 +2141,11 @@ export function PcbEditor({
     // (ACTIONS::highContrastMode toggles Normal <-> Dim).
     if (id === 'highContrast') {
       setContrast((c) => (c === 'normal' ? 'dim' : 'normal'));
+      return;
+    }
+    // Ratsnest visibility is the Objects tab's LAYER_RATSNEST, single source.
+    if (id === 'showRatsnest') {
+      setObjects((p) => ({ ...p, ratsnest: !p.ratsnest }));
       return;
     }
     setToggles((prev) => {
@@ -2050,10 +2560,9 @@ export function PcbEditor({
                             e.stopPropagation();
                             toggleLayer(name);
                           }}
-                          style={{ opacity: on ? 0.9 : 0.35 }}
                           title="Show or hide this layer"
                         />
-                        <span style={{ opacity: on ? 1 : 0.5 }}>{name}</span>
+                        <span className="ze-ellipsis">{LAYER_DISPLAY_NAMES[name] ?? name}</span>
                       </div>
                     );
                   })}
@@ -2086,7 +2595,6 @@ export function PcbEditor({
                             onClick={() => {
                               if (!disabled) setObjects((p) => ({ ...p, [key]: !p[key] }));
                             }}
-                            style={{ opacity: on ? 0.9 : 0.35 }}
                             title={`Show or hide ${label.toLowerCase()}`}
                           />
                         )}
@@ -2113,22 +2621,177 @@ export function PcbEditor({
 
                 {tab === 'Nets' && (
                   <>
-                    <input
-                      type="search"
-                      placeholder="Filter nets"
-                      value={netQuery}
-                      onChange={(e) => setNetQuery(e.target.value)}
-                      style={{ width: '100%', marginBottom: 6, fontSize: 12 }}
-                    />
-                    {nets.slice(0, 400).map(([code, name]) => (
-                      <div key={code} className="ze-tree-item" title={`Net ${code}`}>
-                        {name || `(unnamed ${code})`}
-                      </div>
-                    ))}
+                    {/* Nets header row: label + filter box (appearance_controls_base). */}
+                    <div className="ze-nets-header">
+                      <span>Nets</span>
+                      <input
+                        type="search"
+                        placeholder="Filter nets"
+                        value={netQuery}
+                        onChange={(e) => setNetQuery(e.target.value)}
+                      />
+                    </div>
+                    {/* Net rows: [color swatch][visibility][name]; the swatch
+                        opens a color picker, the eye hides the net's ratsnest. */}
+                    {nets.slice(0, 400).map(([code, name]) => {
+                      const color = netColors.get(code);
+                      const on = !hiddenNets.has(code);
+                      return (
+                        <div key={code} className="ze-object-row" title={`Net ${code}`}>
+                          <label
+                            className={`ze-layer-swatch picker${color ? '' : ' unset'}`}
+                            style={color ? { background: color } : undefined}
+                            title="Set net color"
+                          >
+                            <input
+                              type="color"
+                              value={color ?? '#000000'}
+                              onChange={(e) =>
+                                setNetColors((p) => new Map(p).set(code, e.target.value))
+                              }
+                            />
+                          </label>
+                          <img
+                            className="ze-layer-eye"
+                            src={eyeUrl(on)}
+                            alt={on ? 'visible' : 'hidden'}
+                            title={`Show or hide ratsnest for ${name}`}
+                            onClick={() =>
+                              setHiddenNets((p) => {
+                                const next = new Set(p);
+                                if (next.has(code)) next.delete(code);
+                                else next.add(code);
+                                return next;
+                              })
+                            }
+                          />
+                          <span className="ze-ellipsis">{name || `(unnamed ${code})`}</span>
+                        </div>
+                      );
+                    })}
                     {nets.length > 400 && <div className="ze-muted">…{nets.length - 400} more</div>}
+
+                    {/* Net Classes (the lower half of the nets splitter). */}
+                    <div className="ze-nets-header" style={{ marginTop: 8 }}>
+                      <span>Net Classes</span>
+                    </div>
+                    {netclassInfo.classes.map((cls) => {
+                      const color = classColorOf(cls);
+                      const on = !hiddenClasses.has(cls);
+                      return (
+                        <div key={cls} className="ze-object-row">
+                          <label
+                            className={`ze-layer-swatch picker${color ? '' : ' unset'}`}
+                            style={color ? { background: color } : undefined}
+                            title="Set netclass color"
+                          >
+                            <input
+                              type="color"
+                              value={color?.startsWith('#') ? color : '#000000'}
+                              onChange={(e) =>
+                                setClassColors((p) => new Map(p).set(cls, e.target.value))
+                              }
+                            />
+                          </label>
+                          <img
+                            className="ze-layer-eye"
+                            src={eyeUrl(on)}
+                            alt={on ? 'visible' : 'hidden'}
+                            title={`Show or hide ratsnest for the ${cls} class`}
+                            onClick={() =>
+                              setHiddenClasses((p) => {
+                                const next = new Set(p);
+                                if (next.has(cls)) next.delete(cls);
+                                else next.add(cls);
+                                return next;
+                              })
+                            }
+                          />
+                          <span className="ze-ellipsis">{cls}</span>
+                        </div>
+                      );
+                    })}
                   </>
                 )}
               </div>
+
+              {/* "Net Display Options" collapsible pane on the Nets tab. */}
+              {tab === 'Nets' && (
+                <div className="ze-collapsepane">
+                  <button className="ze-collapse-toggle" onClick={() => setNetOptsOpen((o) => !o)}>
+                    <span className={`ze-collapse-arrow${netOptsOpen ? ' open' : ''}`} />
+                    Net Display Options
+                  </button>
+                  {netOptsOpen && (
+                    <div className="ze-collapse-body">
+                      <div className="ze-info" title="Choose when to show net and netclass colors">
+                        Net colors:
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label title="Net and netclass colors are shown on all copper items">
+                          <input
+                            type="radio"
+                            name="ze-netcolor"
+                            checked={netColorMode === 'all'}
+                            onChange={() => setNetColorMode('all')}
+                          />
+                          All
+                        </label>
+                        <label title="Net and netclass colors are shown on the ratsnest only">
+                          <input
+                            type="radio"
+                            name="ze-netcolor"
+                            checked={netColorMode === 'ratsnest'}
+                            onChange={() => setNetColorMode('ratsnest')}
+                          />
+                          Ratsnest
+                        </label>
+                        <label title="Net and netclass colors are not shown">
+                          <input
+                            type="radio"
+                            name="ze-netcolor"
+                            checked={netColorMode === 'off'}
+                            onChange={() => setNetColorMode('off')}
+                          />
+                          None
+                        </label>
+                      </div>
+                      <div className="ze-info" style={{ marginTop: 6 }}>
+                        Ratsnest display:
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label title="Show ratsnest lines to items on all layers">
+                          <input
+                            type="radio"
+                            name="ze-ratsmode"
+                            checked={ratsnestMode === 'all'}
+                            onChange={() => setRatsnestMode('all')}
+                          />
+                          All
+                        </label>
+                        <label title="Show ratsnest lines to items on visible layers">
+                          <input
+                            type="radio"
+                            name="ze-ratsmode"
+                            checked={ratsnestMode === 'visible'}
+                            onChange={() => setRatsnestMode('visible')}
+                          />
+                          Visible layers
+                        </label>
+                        <label title="Hide all ratsnest lines">
+                          <input
+                            type="radio"
+                            name="ze-ratsmode"
+                            checked={ratsnestMode === 'off'}
+                            onChange={() => setRatsnestMode('off')}
+                          />
+                          None
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* "Layer Display Options" collapsible pane at the bottom of the
                   Layers tab (createControls). */}
@@ -2199,12 +2862,12 @@ export function PcbEditor({
                       {p.name}
                     </option>
                   ))}
-                  <option disabled>---</option>
+                  <option value="---">---</option>
                   <option>Save preset...</option>
                   <option disabled={userPresets.length === 0}>Delete preset...</option>
                 </select>
                 <div className="ze-info" style={{ marginTop: 4 }}>
-                  Viewports (Alt+Tab):
+                  Viewports (Shift+Tab):
                 </div>
                 <select value={viewportSel} onChange={(e) => onViewportChoice(e.target.value)}>
                   {viewports.map((v) => (
@@ -2533,7 +3196,7 @@ export function PcbEditor({
           <b>Nets</b> {board ? Math.max(0, board.nets.size - 1) : 0}
         </span>
         <span className="cell grow">
-          <b>Unrouted</b> 0
+          <b>Unrouted</b> {ratsnestEdges.length}
         </span>
         <span className="cell">{fileName}</span>
       </div>

@@ -653,8 +653,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 4px 1px 1px;
-  font-size: 12px;
+  padding: 2px 4px 2px 2px;
+  font-size: 13px;
+  line-height: 1.4;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -663,6 +664,10 @@ body {
 }
 .ze-layer-row.active {
   background: var(--chrome-active);
+}
+.ze-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* INDICATOR_ICON: small right-pointing marker on the active layer row. */
 .ze-layer-indicator {
@@ -699,12 +704,48 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 4px 1px 1px;
-  font-size: 12px;
+  padding: 2px 4px 2px 2px;
+  font-size: 13px;
+  line-height: 1.4;
   white-space: nowrap;
 }
 .ze-object-row input[type="range"] {
   height: 14px;
+}
+
+/* Color swatch that opens a picker (COLOR_SWATCH): the native color input is
+   hidden inside the swatch label so clicking the square opens the dialog. */
+.ze-layer-swatch.picker {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+.ze-layer-swatch.picker input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+}
+.ze-layer-swatch.unset {
+  background: linear-gradient(to top right, transparent 46%, #888 47%, #888 53%, transparent 54%)
+    #2a2a2a;
+}
+
+/* Nets tab headers ("Nets" / "Net Classes") with the filter box. */
+.ze-nets-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  margin: 2px 0 4px;
+}
+.ze-nets-header input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
 }
 
 /* WX_COLLAPSIBLE_PANE ("Layer Display Options" / "Net Display Options") */
@@ -736,7 +777,7 @@ body {
 }
 .ze-collapse-body {
   padding: 2px 2px 4px 14px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ze-collapse-body label {
   display: inline-flex;
@@ -745,8 +786,8 @@ body {
   cursor: pointer;
 }
 .ze-info {
-  font-size: 11px;
-  opacity: 0.8;
+  font-size: 12px;
+  opacity: 0.85;
   margin-bottom: 2px;
 }
 .ze-hr {
@@ -788,7 +829,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 2px 0;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 .ze-muted {

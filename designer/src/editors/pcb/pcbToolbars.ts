@@ -154,7 +154,6 @@ export const PCB_RIGHT_TOOLBAR: ToolEntry[] = [
     id: 'localRatsnestTool',
     icon: 'localRatsnestTool',
     title: 'Local Ratsnest\nToggle ratsnest display of selected item(s)',
-    ...todo,
   },
   sep,
   { id: 'placeFootprint', icon: 'placeFootprint', title: 'Place Footprints (A)', ...todo },
@@ -208,11 +207,11 @@ export const PCB_RIGHT_TOOLBAR: ToolEntry[] = [
   { id: 'drawZone', icon: 'drawZone', title: 'Draw Filled Zones (Ctrl+Shift+Z)', ...todo },
   { id: 'drawRuleArea', icon: 'drawRuleArea', title: 'Draw Rule Areas (Ctrl+Shift+K)', ...todo },
   sep,
-  { id: 'drawLine', icon: 'drawLine', title: 'Draw Lines (Ctrl+Shift+L)', ...todo },
+  { id: 'drawLine', icon: 'drawLine', title: 'Draw Lines (Ctrl+Shift+L)' },
   {
     group: 'Arc',
     actions: [
-      { id: 'drawArc', icon: 'drawArc', title: 'Draw Arcs (Ctrl+Shift+A)', ...todo },
+      { id: 'drawArc', icon: 'drawArc', title: 'Draw Arcs (Ctrl+Shift+A)' },
       {
         id: 'drawEllipseArc',
         icon: 'drawEllipseArc',
@@ -221,11 +220,11 @@ export const PCB_RIGHT_TOOLBAR: ToolEntry[] = [
       },
     ],
   },
-  { id: 'drawRectangle', icon: 'drawRectangle', title: 'Draw Rectangles', ...todo },
+  { id: 'drawRectangle', icon: 'drawRectangle', title: 'Draw Rectangles' },
   {
     group: 'Circle',
     actions: [
-      { id: 'drawCircle', icon: 'drawCircle', title: 'Draw Circles (Ctrl+Shift+C)', ...todo },
+      { id: 'drawCircle', icon: 'drawCircle', title: 'Draw Circles (Ctrl+Shift+C)' },
       { id: 'drawEllipse', icon: 'drawEllipse', title: 'Draw Ellipse\nDraw an ellipse', ...todo },
     ],
   },
@@ -338,7 +337,7 @@ export const PCB_RIGHT_TOOLBAR: ToolEntry[] = [
       },
     ],
   },
-  { id: 'drawPolygon', icon: 'drawPolygon', title: 'Draw Polygons (Ctrl+Shift+P)', ...todo },
+  { id: 'drawPolygon', icon: 'drawPolygon', title: 'Draw Polygons (Ctrl+Shift+P)' },
   { id: 'drawBezier', icon: 'drawBezier', title: 'Draw Bezier Curve (Ctrl+Shift+B)', ...todo },
   {
     id: 'placeReferenceImage',

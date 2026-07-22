@@ -801,6 +801,21 @@ export function deleteBoardItems(board: Board, ids: ReadonlySet<string>): Board 
 }
 
 /**
+ * Append a freshly-drawn graphic shape (DRAWING_TOOL commit). The shape is
+ * source-less; the writer emits it from buildBoardShapeNode.
+ */
+export function addBoardShape(
+  board: Board,
+  shape: Omit<PcbShape, 'source'>,
+): { board: Board; id: string } {
+  const withSource: PcbShape = { ...shape, source: { kind: 'list', items: [] } };
+  return {
+    board: { ...board, shapes: [...board.shapes, withSource] },
+    id: boardItemId('shape', board.shapes.length),
+  };
+}
+
+/**
  * A board holding only the selected items, keeping all board metadata (layers,
  * stackup, paper…) so it renders identically. Used as the live move overlay:
  * the moving items are drawn from this subset following the cursor while the
