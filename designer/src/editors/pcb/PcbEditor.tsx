@@ -592,6 +592,7 @@ export function PcbEditor({
   text,
   onExit,
   onShowSchematic,
+  onShowFootprintEditor,
   projectName,
   projectFiles,
 }: {
@@ -599,6 +600,8 @@ export function PcbEditor({
   text: string;
   onExit: () => void;
   onShowSchematic?: () => void;
+  /** Open the Footprint Editor (the top-toolbar button / Tools menu). */
+  onShowFootprintEditor?: () => void;
   /** Project name shown as "<project> — PCB Editor" in the menu bar. */
   projectName?: string;
   /** The open project's files (name + text) — lets the 3D viewer resolve
@@ -1722,6 +1725,116 @@ export function PcbEditor({
   const zoomToFit = useCallback(() => zoomToFitImpl(true), [zoomToFitImpl]);
   const zoomFitObjects = useCallback(() => zoomToFitImpl(false), [zoomToFitImpl]);
 
+  // DIALOG_FIND::search: collect hits in upstream order — footprint reference
+  // designators, footprint values, other text items (footprint text, board
+  // text, zone names), then net names — and walk the list with Find Next /
+  // Find Previous, wrapping when enabled. Each hit selects the item and
+  // centres the view on it (FocusOnLocation).
+  const runFind = useCallback(
+    (dir: 'next' | 'prev' | 'restart') => {
+      const brd = boardRef.current;
+      if (!brd) return;
+      const q = findQuery;
+      const matches = (s0: string): boolean => {
+        if (!q) return false;
+        const s = findOpts.matchCase ? s0 : s0.toLowerCase();
+        const needle = findOpts.matchCase ? q : q.toLowerCase();
+        if (findOpts.wildcard) {
+          const rx = new RegExp(
+            `^${needle
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+              .replace(/\*/g, '.*')
+              .replace(/\?/g, '.')}$`,
+          );
+          return rx.test(s);
+        }
+        if (findOpts.wholeWord) {
+          const rx = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+          return rx.test(s);
+        }
+        return s.includes(needle);
+      };
+
+      if (findDirtyRef.current || dir === 'restart') {
+        const hits: { id: string; pos: { x: number; y: number } }[] = [];
+        brd.footprints.forEach((fp, i) => {
+          const refIdx = fp.texts.findIndex((t) => t.kind === 'reference');
+          const valIdx = fp.texts.findIndex((t) => t.kind === 'value');
+          if (findOpts.includeReferences && matches(fp.reference ?? ''))
+            hits.push({
+              id: refIdx >= 0 ? boardItemId('fptext', i, refIdx) : boardItemId('footprint', i),
+              pos: refIdx >= 0 ? fp.texts[refIdx]!.at : fp.at,
+            });
+          if (findOpts.includeValues && matches(fp.value ?? ''))
+            hits.push({
+              id: valIdx >= 0 ? boardItemId('fptext', i, valIdx) : boardItemId('footprint', i),
+              pos: valIdx >= 0 ? fp.texts[valIdx]!.at : fp.at,
+            });
+          if (findOpts.includeTexts)
+            fp.texts.forEach((t, ti) => {
+              if (t.kind === 'user' && !t.hide && matches(t.text))
+                hits.push({ id: boardItemId('fptext', i, ti), pos: t.at });
+            });
+        });
+        if (findOpts.includeTexts) {
+          brd.texts.forEach((t, i) => {
+            if (matches(t.text)) hits.push({ id: boardItemId('text', i), pos: t.at });
+          });
+          brd.zones.forEach((z, i) => {
+            const p = z.outline?.[0] ?? z.fills[0]?.polys[0]?.[0];
+            if (z.netName && p && matches(z.netName))
+              hits.push({ id: boardItemId('zone', i), pos: p });
+          });
+        }
+        if (findOpts.includeNets) {
+          for (const [code, name] of brd.nets) {
+            if (code === 0 || !matches(name)) continue;
+            // Focus the first copper item carrying the net.
+            const t = brd.tracks.findIndex((x) => x.net === code);
+            if (t >= 0) {
+              hits.push({ id: boardItemId('track', t), pos: brd.tracks[t]!.start });
+              continue;
+            }
+            const v = brd.vias.findIndex((x) => x.net === code);
+            if (v >= 0) hits.push({ id: boardItemId('via', v), pos: brd.vias[v]!.at });
+          }
+        }
+        findHitsRef.current = hits;
+        findCursorRef.current = -1;
+        findDirtyRef.current = false;
+      }
+
+      const hits = findHitsRef.current;
+      if (hits.length === 0) {
+        setFindStatus(q ? `"${q}" not found` : '');
+        return;
+      }
+      let cur = findCursorRef.current;
+      if (dir === 'prev') cur -= 1;
+      else cur += 1;
+      if (findOpts.wrap) cur = ((cur % hits.length) + hits.length) % hits.length;
+      else cur = Math.max(0, Math.min(hits.length - 1, cur));
+      findCursorRef.current = cur;
+      const hit = hits[cur]!;
+      setFindStatus(`Hit(s): ${cur + 1} of ${hits.length}`);
+      setSelection(new Set([hit.id]));
+      // FocusOnLocation: centre the view on the hit at the current zoom.
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const v = viewRef.current;
+        const sx = v.flipX ? -v.scale : v.scale;
+        v.tx = canvas.width / 2 - hit.pos.x * sx;
+        v.ty = canvas.height / 2 - hit.pos.y * v.scale;
+        requestDraw();
+      }
+    },
+    [findQuery, findOpts, requestDraw],
+  );
+  // Query/options edits restart the search on the next Find.
+  useEffect(() => {
+    findDirtyRef.current = true;
+  }, [findQuery, findOpts]);
+
   // The TOP_AUX zoom selector: set an absolute zoom about the viewport centre.
   // The status bar Z indicator is scale·1000, so preset Z → scale Z/1000.
   const setZoomPreset = useCallback(
@@ -2704,6 +2817,11 @@ export function PcbEditor({
         redo();
         return;
       }
+      if (mod && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
       if (mod && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
         duplicateSel();
@@ -3321,6 +3439,9 @@ export function PcbEditor({
         // selection tool after one use (handled on pointer-up).
         setActiveTool('zoomTool');
         break;
+      case 'footprintEditor':
+        onShowFootprintEditor?.();
+        break;
       case 'showEeschema':
         onShowSchematic?.();
         break;
@@ -3399,7 +3520,7 @@ export function PcbEditor({
           ],
         },
         { sep: true },
-        { label: 'Find', disabled: dis, shortcut: 'Ctrl+F' },
+        { label: 'Find', action: () => setFindOpen(true), shortcut: 'Ctrl+F' },
         { sep: true },
         { label: 'Global Deletions…', disabled: dis },
       ],
@@ -4820,6 +4941,18 @@ export function PcbEditor({
             </div>
           </div>
         </>
+      )}
+
+      {findOpen && (
+        <DialogPcbFind
+          query={findQuery}
+          options={findOpts}
+          onQuery={setFindQuery}
+          onOptions={setFindOpts}
+          onFind={runFind}
+          onClose={() => setFindOpen(false)}
+          status={findStatus}
+        />
       )}
 
       {/* EDA_DRAW_FRAME hosts a message panel above pcbnew's 8-field status bar. */}

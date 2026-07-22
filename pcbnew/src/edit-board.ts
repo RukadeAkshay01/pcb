@@ -491,7 +491,10 @@ export function boardHitCandidates(
   // picked. Footprints stay selectable (their bodies span several layers).
   const vis = opts.visibleLayers;
   const selectable = (layers: string[]): boolean =>
-    !vis || layers.some((l) => (l.startsWith('*.') ? [...vis].some((v) => v.endsWith(l.slice(1))) : vis.has(l)));
+    !vis ||
+    layers.some((l) =>
+      l.startsWith('*.') ? [...vis].some((v) => v.endsWith(l.slice(1))) : vis.has(l),
+    );
 
   board.vias.forEach((v, i) => {
     const d = Math.max(0, dist(pos, v.at) - v.size / 2);
@@ -1700,8 +1703,7 @@ export function mirrorBoardItems(
   const mir = (p: Vec2): Vec2 =>
     direction === 'v' ? { x: p.x, y: 2 * c.y - p.y } : { x: 2 * c.x - p.x, y: p.y };
   // Reflecting a rotation: across a horizontal axis θ→−θ, vertical θ→180−θ.
-  const mirAngle = (deg: number): number =>
-    norm360(direction === 'v' ? -deg : 180 - deg);
+  const mirAngle = (deg: number): number => norm360(direction === 'v' ? -deg : 180 - deg);
   const idx = indicesByKind(ids);
 
   const mirTrack = (t: PcbTrack): PcbTrack => {
