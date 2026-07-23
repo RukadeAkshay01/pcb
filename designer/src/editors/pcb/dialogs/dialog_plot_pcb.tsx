@@ -16,6 +16,7 @@ import {
   plotGerberLayer,
   plotExcellonDrill,
   gerberProtelExtension,
+  plotGerberJob,
   type Board,
 } from '@ziroeda/pcbnew';
 
@@ -42,7 +43,10 @@ export function DialogPcbPlot({ board, visibleLayers, onClose }: Props): JSX.Ele
   const [checked, setChecked] = useState<Set<string>>(
     () => new Set(layerNames.filter((l) => visibleLayers.has(l))),
   );
-  const [protel, setProtel] = useState(true);
+  const [protel, setProtel] = useState(false);
+  const [jobFile, setJobFile] = useState(true);
+  const [coordDigits, setCoordDigits] = useState<5 | 6>(6);
+  const [zoneNote] = useState(true);
   const base = (board.fileName ?? 'board').replace(/\.kicad_pcb$/i, '');
 
   const toggle = (name: string): void =>
@@ -55,13 +59,16 @@ export function DialogPcbPlot({ board, visibleLayers, onClose }: Props): JSX.Ele
 
   const plot = (): void => {
     const files: Record<string, Uint8Array> = {};
+    const made: { layer: string; name: string }[] = [];
     const date = new Date().toISOString();
     for (const layer of checked) {
       const ext = protel ? gerberProtelExtension(layer) : 'gbr';
       const name = `${base}-${layer.replace(/\./g, '_')}.${ext}`;
-      files[name] = strToU8(plotGerberLayer(board, layer, { creationDate: date }));
+      files[name] = strToU8(plotGerberLayer(board, layer, { creationDate: date, coordDigits }));
+      made.push({ layer, name });
     }
-    if (Object.keys(files).length === 0) return;
+    if (made.length === 0) return;
+    if (jobFile) files[`${base}-job.gbrjob`] = strToU8(plotGerberJob(board, made));
     download(`${base}-gerbers.zip`, zipSync(files));
   };
 
@@ -102,6 +109,68 @@ export function DialogPcbPlot({ board, visibleLayers, onClose }: Props): JSX.Ele
               </select>
             </label>
             <fieldset>
+              <legend>General Options</legend>
+              <div style={{ display: 'flex', gap: 14 }}>
+                <div>
+                  <label
+                    style={{ display: 'block', opacity: 0.5 }}
+                    title="Sheet plotting applies to SVG/PDF (staged)"
+                  >
+                    <input type="checkbox" disabled /> Plot drawing sheet
+                  </label>
+                  <label style={{ display: 'block', opacity: 0.5 }} title="Staged">
+                    <input type="checkbox" disabled /> Subtract soldermask from silkscreen
+                  </label>
+                  <label style={{ display: 'block', opacity: 0.5 }} title="Staged">
+                    <input type="checkbox" disabled /> Indicate DNP on fabrication layers
+                  </label>
+                  <label style={{ display: 'block', opacity: 0.5 }} title="Staged">
+                    <input type="checkbox" disabled /> Sketch pads on fabrication layers
+                  </label>
+                </div>
+                <div>
+                  {/* Disabled for the Gerber format, exactly like DIALOG_PLOT. */}
+                  <label
+                    style={{ display: 'block', opacity: 0.5 }}
+                    title="Not applicable to Gerber (KiCad disables these too)"
+                  >
+                    Drill marks:{' '}
+                    <select disabled>
+                      <option>None</option>
+                    </select>
+                  </label>
+                  <label
+                    style={{ display: 'block', opacity: 0.5 }}
+                    title="Not applicable to Gerber"
+                  >
+                    Scaling:{' '}
+                    <select disabled>
+                      <option>1:1</option>
+                    </select>
+                  </label>
+                  <label
+                    style={{ display: 'block', opacity: 0.5 }}
+                    title="Not applicable to Gerber"
+                  >
+                    <input type="checkbox" disabled /> Mirrored plot
+                  </label>
+                  <label
+                    style={{ display: 'block', opacity: 0.5 }}
+                    title="Not applicable to Gerber"
+                  >
+                    <input type="checkbox" disabled /> Negative plot
+                  </label>
+                  <label
+                    style={{ display: 'block' }}
+                    title="Zone fills are always current in this editor"
+                  >
+                    <input type="checkbox" checked={zoneNote} readOnly /> Check zone fills before
+                    plotting
+                  </label>
+                </div>
+              </div>
+            </fieldset>
+            <fieldset>
               <legend>Gerber Options</legend>
               <label style={{ display: 'block' }}>
                 <input
@@ -111,13 +180,22 @@ export function DialogPcbPlot({ board, visibleLayers, onClose }: Props): JSX.Ele
                 />{' '}
                 Use Protel filename extensions
               </label>
-              <label style={{ display: 'block', opacity: 0.5 }} title="Job files are staged">
-                <input type="checkbox" disabled /> Generate Gerber job file
+              <label style={{ display: 'block' }}>
+                <input
+                  type="checkbox"
+                  checked={jobFile}
+                  onChange={(e) => setJobFile(e.target.checked)}
+                />{' '}
+                Generate Gerber job file
               </label>
               <label style={{ display: 'block' }}>
                 Coordinate format:{' '}
-                <select disabled value="46">
-                  <option value="46">4.6, unit mm</option>
+                <select
+                  value={coordDigits}
+                  onChange={(e) => setCoordDigits(Number(e.target.value) as 5 | 6)}
+                >
+                  <option value={5}>4.5, unit mm</option>
+                  <option value={6}>4.6, unit mm</option>
                 </select>
               </label>
               <label style={{ display: 'block', opacity: 0.5 }}>
