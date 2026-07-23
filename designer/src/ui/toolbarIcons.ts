@@ -17,6 +17,8 @@ const BITMAP: Record<string, string> = {
   updatePcbFromSch: 'update_pcb_from_sch',
   runDRC: 'drc',
   showEeschema: 'icon_eeschema_24',
+  currentVariant: 'design_variant',
+  ipcScripting: 'scripting',
   lock: 'locked',
   unlock: 'lock_unlock',
   footprintBrowser: 'library_browser',
