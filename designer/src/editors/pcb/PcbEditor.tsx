@@ -617,6 +617,9 @@ export function PcbEditor({
   projectFiles?: { name: string; text: string }[];
 }): JSX.Element {
   const [board, setBoard] = useState<Board | null>(null);
+  // Unsaved-changes flag: '*' in the title while modified, Save greys when
+  // clean (KiCad's IsContentModified / m_infoBar save affordance).
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<ReadonlySet<string>>(new Set());
   const [activeLayer, setActiveLayer] = useState('F.Cu');
@@ -1478,6 +1481,7 @@ export function PcbEditor({
       const prev = boardRef.current;
       if (prev) undoRef.current.push(prev);
       redoRef.current = [];
+      setDirty(true);
       setBoardModel(next);
     },
     [setBoardModel],
@@ -1513,6 +1517,7 @@ export function PcbEditor({
     const prev = undoRef.current.pop();
     if (!prev || !boardRef.current) return;
     redoRef.current.push(boardRef.current);
+    setDirty(true);
     setBoardModel(prev);
     setSelection(new Set());
   }, [setBoardModel]);
@@ -1521,6 +1526,7 @@ export function PcbEditor({
     const next = redoRef.current.pop();
     if (!next || !boardRef.current) return;
     undoRef.current.push(boardRef.current);
+    setDirty(true);
     setBoardModel(next);
     setSelection(new Set());
   }, [setBoardModel]);
@@ -3396,6 +3402,7 @@ export function PcbEditor({
         // download from there. "Save a Copy…" keeps the local download.
         if (onSaveBoard) onSaveBoard(boardRef.current ? serializeBoard(boardRef.current) : text);
         else saveCopy();
+        setDirty(false);
         break;
       case 'undo':
         undo();
@@ -3892,12 +3899,20 @@ export function PcbEditor({
         }
         title={
           <>
-            <b>{projectName || fileName.replace(/\.kicad_pcb$/i, '') || 'No project'}</b>
+            <b>
+              {dirty ? '*' : ''}
+              {projectName || fileName.replace(/\.kicad_pcb$/i, '') || 'No project'}
+            </b>
             &nbsp;—&nbsp;PCB Editor
           </>
         }
       />
-      <Toolbar entries={PCB_TOP_TOOLBAR} orientation="horizontal" onActivate={onTopAction} />
+      <Toolbar
+        entries={PCB_TOP_TOOLBAR}
+        orientation="horizontal"
+        disabledIds={dirty ? undefined : new Set(['save'])}
+        onActivate={onTopAction}
+      />
 
       {/* TOP_AUX bar (toolbars_pcb_editor.cpp TOOLBAR_LOC::TOP_AUX): track
           width + auto-width | via size | layer selector + layer pair | grid |
