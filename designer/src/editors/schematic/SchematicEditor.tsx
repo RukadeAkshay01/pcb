@@ -950,6 +950,29 @@ export function SchematicEditor({
     return noExt || doc?.titleBlock?.title || 'schematic';
   }, [currentFile, fileName, doc]);
 
+  // Commit a new SchematicSetup: adopt it and write the project's .kicad_pro
+  // (SCHEMATIC_SETTINGS / ERC_SETTINGS / NET_SETTINGS all live there),
+  // preserving every key the dialog does not own — same flow as the
+  // drawing-sheet reference in applyPageSettings. Used by the Schematic Setup
+  // dialog's OK and by dialogs that write single settings back (Annotate).
+  const commitSetup = useCallback(
+    (next: SchematicSetup) => {
+      setSetup(next);
+      setRawFiles((prev) => {
+        const pro = findProjectPro(prev, rootPro ?? undefined);
+        if (!pro) return prev;
+        const updated = writeSchematicSetupText(pro.text, next);
+        if (updated === null || updated === pro.text) return prev;
+        const changed = { name: pro.name, text: updated };
+        // Persist now (not via the debounced autosave) so a reopen straight
+        // after the dialog reads the new settings back.
+        onPersistFiles?.([changed]);
+        return prev.map((f) => (f.name === pro.name ? changed : f));
+      });
+    },
+    [rootPro, onPersistFiles],
+  );
+
   // Drawing defaults shared by every output (screen, print, plot), derived
   // from Schematic Setup > Formatting the way SCH_RENDER_SETTINGS is seeded
   // from SCHEMATIC_SETTINGS upstream (eeschema_config.cpp).
@@ -2881,9 +2904,46 @@ export function SchematicEditor({
           {annotateOpen && (
             <DialogAnnotate
               hasSelection={selection.size > 0}
+              // Sort order, numbering method and start number are project
+              // settings (SCHEMATIC_SETTINGS) — seed from Schematic Setup >
+              // Annotation like DIALOG_ANNOTATE::TransferDataToWindow.
+              initial={{
+                order: setup.annotation.sortOrder,
+                algo:
+                  setup.annotation.numbering === 'sheetX100'
+                    ? 'sheet_100'
+                    : setup.annotation.numbering === 'sheetX1000'
+                      ? 'sheet_1000'
+                      : 'incremental',
+                startNumber: setup.annotation.firstFreeAfter,
+              }}
               onAnnotate={runAnnotate}
               onClear={runClearAnnotation}
-              onClose={() => setAnnotateOpen(false)}
+              onClose={(s) => {
+                // ~DIALOG_ANNOTATE: write changed settings back to the project.
+                const numbering =
+                  s.algo === 'sheet_100'
+                    ? 'sheetX100'
+                    : s.algo === 'sheet_1000'
+                      ? 'sheetX1000'
+                      : 'firstFree';
+                if (
+                  s.order !== setup.annotation.sortOrder ||
+                  numbering !== setup.annotation.numbering ||
+                  s.startNumber !== setup.annotation.firstFreeAfter
+                ) {
+                  commitSetup({
+                    ...setup,
+                    annotation: {
+                      ...setup.annotation,
+                      sortOrder: s.order,
+                      numbering,
+                      firstFreeAfter: s.startNumber,
+                    },
+                  });
+                }
+                setAnnotateOpen(false);
+              }}
             />
           )}
           {pageSettingsOpen && doc && (
@@ -2934,22 +2994,7 @@ export function SchematicEditor({
             <DialogSchematicSetup
               value={setup}
               onOk={(next) => {
-                setSetup(next);
-                // Commit to the project's .kicad_pro (SCHEMATIC_SETTINGS /
-                // ERC_SETTINGS / NET_SETTINGS all live there), preserving every
-                // key the dialog does not own — same flow as the drawing-sheet
-                // reference in applyPageSettings.
-                setRawFiles((prev) => {
-                  const pro = findProjectPro(prev, rootPro ?? undefined);
-                  if (!pro) return prev;
-                  const updated = writeSchematicSetupText(pro.text, next);
-                  if (updated === null || updated === pro.text) return prev;
-                  const changed = { name: pro.name, text: updated };
-                  // Persist now (not via the debounced autosave) so a reopen
-                  // straight after OK reads the new settings back.
-                  onPersistFiles?.([changed]);
-                  return prev.map((f) => (f.name === pro.name ? changed : f));
-                });
+                commitSetup(next);
                 setSetupOpen(false);
               }}
               onCancel={() => setSetupOpen(false)}

@@ -11,6 +11,7 @@ import {
   writeSchematicSetupText,
 } from '@ziroeda/designer/src/editors/schematic/project_settings.js';
 import {
+  blankNetClass,
   defaultSchematicSetup,
   type SchematicSetup,
 } from '@ziroeda/designer/src/editors/schematic/schematic_settings.js';
@@ -115,9 +116,12 @@ describe('schematic setup .kicad_pro persistence', () => {
   it('reads defaults from an empty project and the new-project template', () => {
     expect(readSchematicSetup([])).toEqual(defaultSchematicSetup());
     const fromTemplate = readSchematicSetupText(TEMPLATE);
-    // The template's Default netclass carries clearance 0.2; all else default.
+    // A stored classes list wins verbatim: the template's Default carries only
+    // clearance 0.2, so every other dimension reads as unset — like KiCad's
+    // NETCLASS(name, false) reader. Factory defaults only apply when the file
+    // has no net_settings.classes at all.
     const want = defaultSchematicSetup();
-    want.netClasses.classes[0]!.clearance = '0.2';
+    want.netClasses.classes[0] = { ...blankNetClass('Default'), clearance: '0.2' };
     expect(fromTemplate).toEqual(want);
   });
 

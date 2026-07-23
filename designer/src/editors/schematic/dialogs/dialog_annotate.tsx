@@ -8,19 +8,40 @@
 import { useState, type JSX } from 'react';
 import type { AnnotateOptions } from '@ziroeda/eeschema';
 
-interface Props {
-  hasSelection: boolean;
-  onAnnotate: (opts: AnnotateOptions) => void;
-  onClear: (scope: AnnotateOptions['scope']) => void;
-  onClose: () => void;
+/** The project-persisted slice of the dialog (SCHEMATIC_SETTINGS: sort order,
+ *  numbering method, start number — DIALOG_ANNOTATE reads them on open and
+ *  writes changes back on close; scope/reset stay app preferences). */
+export interface AnnotateProjectSettings {
+  order: Exclude<AnnotateOptions['order'], 'unsorted'>;
+  algo: AnnotateOptions['algo'];
+  startNumber: number;
 }
 
-export function DialogAnnotate({ hasSelection, onAnnotate, onClear, onClose }: Props): JSX.Element {
+interface Props {
+  hasSelection: boolean;
+  /** Seed from the project's Schematic Setup > Annotation (TransferDataToWindow). */
+  initial: AnnotateProjectSettings;
+  onAnnotate: (opts: AnnotateOptions) => void;
+  onClear: (scope: AnnotateOptions['scope']) => void;
+  /** ~DIALOG_ANNOTATE: the project slice is handed back on every close so the
+   *  caller can persist it when changed (OnModify). */
+  onClose: (settings: AnnotateProjectSettings) => void;
+}
+
+export function DialogAnnotate({
+  hasSelection,
+  initial,
+  onAnnotate,
+  onClear,
+  onClose,
+}: Props): JSX.Element {
   const [scope, setScope] = useState<AnnotateOptions['scope']>('all');
-  const [order, setOrder] = useState<AnnotateOptions['order']>('x');
+  const [order, setOrder] = useState<AnnotateOptions['order']>(initial.order);
   const [reset, setReset] = useState(false);
-  const [algo, setAlgo] = useState<AnnotateOptions['algo']>('incremental');
-  const [startNumber, setStartNumber] = useState(0);
+  const [algo, setAlgo] = useState<AnnotateOptions['algo']>(initial.algo);
+  const [startNumber, setStartNumber] = useState(initial.startNumber);
+  const close = (): void =>
+    onClose({ order: order === 'unsorted' ? 'x' : order, algo, startNumber });
 
   const opts: AnnotateOptions = {
     scope,
@@ -32,11 +53,11 @@ export function DialogAnnotate({ hasSelection, onAnnotate, onClear, onClose }: P
   };
 
   return (
-    <div className="ze-modal-backdrop" onMouseDown={onClose}>
+    <div className="ze-modal-backdrop" onMouseDown={close}>
       <div className="ze-modal ze-annotate-dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className="ze-modal-header">
           Annotate Schematic
-          <span className="x" onClick={onClose}>
+          <span className="x" onClick={close}>
             ✕
           </span>
         </div>
@@ -139,7 +160,7 @@ export function DialogAnnotate({ hasSelection, onAnnotate, onClear, onClose }: P
             Clear Annotation
           </button>
           <span style={{ flex: 1 }} />
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={close}>
             Close
           </button>
           <button type="button" className="primary" onClick={() => onAnnotate(opts)}>
