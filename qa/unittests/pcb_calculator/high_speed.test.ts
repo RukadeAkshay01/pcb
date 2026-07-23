@@ -53,11 +53,11 @@ describe('RF attenuators', () => {
     expect(r.resistors[1]).toBeCloseTo(37.5, 1);
   });
 
-  it('Tee 6.0206 dB (K=2) @ 50 Ω: R1=R2=16.67, R3=66.67', () => {
+  it('Tee 6.0206 dB (K=2) @ 50 Ω: R1=R3=16.67 series, R2=66.67 shunt (KiCad order)', () => {
     const r = calculateAttenuator(AttenuatorType.TEE, 6.0206, 50, 50);
     expect(r.resistors[0]).toBeCloseTo(16.67, 1);
-    expect(r.resistors[1]).toBeCloseTo(16.67, 1);
-    expect(r.resistors[2]).toBeCloseTo(66.67, 1);
+    expect(r.resistors[1]).toBeCloseTo(66.67, 1);
+    expect(r.resistors[2]).toBeCloseTo(16.67, 1);
   });
 
   it('Bridged Tee 10 dB @ 50 Ω: R1≈108.1, R2≈23.12', () => {
@@ -66,10 +66,10 @@ describe('RF attenuators', () => {
     expect(r.resistors[1]).toBeCloseTo(23.12, 1);
   });
 
-  it('Splitter @ 50 Ω is 16.67 Ω each at 6.02 dB', () => {
+  it('Splitter @ 50 Ω is 16.67 Ω each; reports a flat 6.0 dB like KiCad', () => {
     const r = calculateAttenuator(AttenuatorType.SPLITTER, 0, 50, 50);
     expect(r.resistors[0]).toBeCloseTo(50 / 3, 6);
-    expect(r.attenuationDb).toBeCloseTo(6.02, 2);
+    expect(r.attenuationDb).toBe(6.0);
   });
 
   it('enforces minimum attenuation for unequal impedances', () => {

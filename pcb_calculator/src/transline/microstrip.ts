@@ -10,8 +10,11 @@
 import {
   C0,
   LOG2DB,
+  type SoldermaskParams,
   type TcElectrical,
   ZF0,
+  applySoldermaskCorrection,
+  microstripSoldermaskDeltaQ,
   skinDepth,
   unitPropagationDelay,
 } from './tc_common.js';
@@ -151,10 +154,35 @@ function staticZ0(phys: MicrostripPhysical, el: TcElectrical): MsInternal {
   return { z0Static, erEff0: erEff, z0h1, murEff };
 }
 
-export function microstripAnalyze(phys: MicrostripPhysical, el: TcElectrical): MicrostripResult {
+export function microstripAnalyze(
+  phys: MicrostripPhysical,
+  el: TcElectrical,
+  soldermask?: SoldermaskParams,
+): MicrostripResult {
   const er = el.epsilonR;
-  const { z0Static, erEff0, z0h1, murEff } = staticZ0(phys, el);
+  const stat = staticZ0(phys, el);
+  let { z0Static, erEff0 } = stat;
+  const { z0h1, murEff } = stat;
   const u = phys.widthM / phys.heightM;
+
+  // Solder mask cover correction on the static εeff and Z0 before dispersion
+  // and losses consume them (KiCad MICROSTRIP::Analyse; no-op when disabled).
+  let tanDEff = el.tanD;
+  const sm = applySoldermaskCorrection(
+    soldermask,
+    phys.heightM,
+    erEff0,
+    el.tanD,
+    er,
+    soldermask?.present
+      ? microstripSoldermaskDeltaQ(u, soldermask.thicknessM / phys.heightM)
+      : 0.0,
+  );
+  if (sm.changed) {
+    z0Static *= Math.sqrt(erEff0 / sm.epsEff);
+    erEff0 = sm.epsEff;
+    tanDEff = sm.tanD;
+  }
 
   // Dispersion (Kirschning–Jansen). f_n in GHz·mm.
   const fn = (el.frequencyHz * phys.heightM) / 1e6;
@@ -184,7 +212,7 @@ export function microstripAnalyze(phys: MicrostripPhysical, el: TcElectrical): M
     (el.frequencyHz / C0) *
     (er / Math.sqrt(erEff0)) *
     ((erEff0 - 1.0) / (er - 1.0)) *
-    el.tanD;
+    tanDEff;
 
   return {
     z0: z0F,

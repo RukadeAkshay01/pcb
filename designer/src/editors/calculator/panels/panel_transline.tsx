@@ -1,5 +1,5 @@
 /**
- * "Transmission Lines" panel — analysis/synthesis for the eight line types.
+ * "Transmission Lines" panel — analysis/synthesis for the nine line types.
  * Counterpart: KiCad `calculator_panels/panel_transline.cpp`.
  *
  * Every physical dimension has a per-field unit selector (mm/mil/inch/µm…) and
@@ -9,8 +9,15 @@
 
 import { useState, type JSX } from 'react';
 import {
+  CONDUCTOR_RESISTIVITIES,
+  LOSS_TANGENTS,
+  type MaterialPreset,
+  RELATIVE_DIELECTRIC_CONSTANTS,
   coaxAnalyze,
   coaxSynthesize,
+  coupledStriplineAnalyze,
+  coupledStriplineSynthesize,
+  dispersedSubstrate,
   coplanarAnalyze,
   coplanarSynthesize,
   coupledMicrostripAnalyze,
@@ -28,22 +35,25 @@ import { Field, FREQ_UNITS, Group, LEN_UNITS, NumField, fmt, parseNum } from '..
 
 type LineType =
   | 'microstrip'
+  | 'c_microstrip'
+  | 'stripline'
+  | 'c_stripline'
   | 'cpw'
   | 'gcpw'
   | 'rectwaveguide'
   | 'coax'
-  | 'c_microstrip'
-  | 'stripline'
   | 'twistedpair';
 
 const LINE_TYPES: { id: LineType; name: string }[] = [
+  // KiCad master's order (panel_transline.cpp tltype_list).
   { id: 'microstrip', name: 'Microstrip Line' },
+  { id: 'c_microstrip', name: 'Coupled Microstrip Lines' },
+  { id: 'stripline', name: 'Stripline' },
+  { id: 'c_stripline', name: 'Coupled Stripline' },
   { id: 'cpw', name: 'Coplanar Waveguide' },
   { id: 'gcpw', name: 'Coplanar Waveguide with Ground Plane' },
   { id: 'rectwaveguide', name: 'Rectangular Waveguide' },
   { id: 'coax', name: 'Coaxial Line' },
-  { id: 'c_microstrip', name: 'Coupled Microstrip Lines' },
-  { id: 'stripline', name: 'Stripline' },
   { id: 'twistedpair', name: 'Twisted Pair' },
 ];
 
@@ -110,6 +120,14 @@ const PHYS_FIELDS: Record<LineType, PhysField[]> = {
     L('t', 'Strip thickness (T):', 0.035, 'µm'),
     L('l', 'Line length (L):', 50),
   ],
+  c_stripline: [
+    L('w', 'Line width (W):', 0.2),
+    L('s', 'Gap width (S):', 0.2),
+    L('h', 'Height of substrate (H):', 0.2),
+    L('a', 'Offset to nearest ground (a, 0 = centered):', 0),
+    L('t', 'Strip thickness (T):', 0.035, 'µm'),
+    L('l', 'Line length (L):', 50),
+  ],
   twistedpair: [
     L('din', 'Conductor diameter (d):', 0.511),
     L('dout', 'Insulation diameter (D):', 0.93),
@@ -121,10 +139,54 @@ const PHYS_FIELDS: Record<LineType, PhysField[]> = {
 const SUBSTRATE_DEFAULTS = {
   er: '4.5',
   tand: '0.02',
-  sigma: '5.8e7',
+  // KiCad's panel takes the conductor's specific resistance ρ in Ω·m.
+  rho: '1.72e-8',
   mur: '1',
   erEnv: '1',
 };
+
+/** Text field with a KiCad-style "…" preset picker that fills the value. */
+function PresetField({
+  label,
+  value,
+  onChange,
+  unit,
+  presets,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  unit: string;
+  presets: readonly MaterialPreset[];
+}): JSX.Element {
+  return (
+    <div className="calc-field">
+      <span className="calc-field-label">{label}</span>
+      <input
+        className="calc-input"
+        value={value}
+        spellCheck={false}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <select
+        className="calc-select calc-unit-select"
+        value=""
+        title="Standard materials"
+        onChange={(e) => {
+          if (e.target.value !== '') onChange(e.target.value);
+        }}
+      >
+        <option value="">…</option>
+        {presets.map((p) => (
+          <option key={`${p.name}`} value={String(p.value)}>
+            {p.value} — {p.name}
+          </option>
+        ))}
+      </select>
+      <span className="calc-unit">{unit}</span>
+    </div>
+  );
+}
 
 export function PanelTransline(): JSX.Element {
   const [type, setType] = useState<LineType>('microstrip');
@@ -132,6 +194,17 @@ export function PanelTransline(): JSX.Element {
   const [sub, setSub] = useState({ ...SUBSTRATE_DEFAULTS });
   const [phys, setPhys] = useState<Record<string, number>>(() => defaults('microstrip'));
   const [z0, setZ0] = useState('50');
+  // Odd-mode impedance target — used by the coupled stripline (KiCad Zodd).
+  const [zOdd, setZOdd] = useState('50');
+  // Dielectric dispersion model (KiCad m_dielectricModelChoice + spec frequency).
+  const [dielModel, setDielModel] = useState<'constant' | 'djordjevic_sarkar'>('constant');
+  const [specFreqHz, setSpecFreqHz] = useState(1e9);
+  // Solder mask overlay (KiCad m_soldermask* controls; defaults from TRANSLINE::Init).
+  const [smPresent, setSmPresent] = useState(false);
+  const [smThickM, setSmThickM] = useState(20e-6);
+  const [smEr, setSmEr] = useState('3.5');
+  const [smTand, setSmTand] = useState('0.025');
+  const [smFills, setSmFills] = useState(true);
   const [angle, setAngle] = useState('90');
   const [result, setResult] = useState<TranslineAnalysis | null>(null);
   const [error, setError] = useState('');
@@ -146,17 +219,34 @@ export function PanelTransline(): JSX.Element {
     setResult(null);
     setError('');
     setZ0(t === 'c_microstrip' ? '100' : t === 'twistedpair' ? '120' : '50');
+    setZOdd('50');
   };
 
-  const el = () => ({
-    frequencyHz: freqHz,
-    epsilonR: parseNum(sub.er),
-    tanD: parseNum(sub.tand),
-    sigma: parseNum(sub.sigma),
-    mur: 1, // dielectric relative permeability (non-magnetic substrate)
-    murC: parseNum(sub.mur),
-  });
+  const el = () => {
+    const base = {
+      frequencyHz: freqHz,
+      epsilonR: parseNum(sub.er),
+      tanD: parseNum(sub.tand),
+      sigma: 1 / parseNum(sub.rho),
+      mur: 1, // dielectric relative permeability (non-magnetic substrate)
+      murC: parseNum(sub.mur),
+    };
+    // Djordjevic–Sarkar overlays the dispersed εr / tan δ at the operating
+    // frequency, exactly as KiCad's UpdateDielectricModel does per analysis.
+    const d = dispersedSubstrate(base, { model: dielModel, specFreqHz });
+    return { ...base, epsilonR: d.epsilonR, tanD: d.tanD };
+  };
   const v = (key: string): number => phys[key] ?? 0;
+
+  // Mask correction applies to microstrip, coupled microstrip, CPW and CBCPW.
+  const maskApplies = ['microstrip', 'c_microstrip', 'cpw', 'gcpw'].includes(type);
+  const soldermask = () => ({
+    present: smPresent,
+    thicknessM: smThickM,
+    epsilonR: parseNum(smEr),
+    tanD: parseNum(smTand),
+    fillsGaps: smFills,
+  });
 
   const analyze = (): void => {
     setError('');
@@ -168,6 +258,7 @@ export function PanelTransline(): JSX.Element {
           r = microstripAnalyze(
             { widthM: v('w'), heightM: v('h'), thicknessM: v('t'), lengthM: v('l') },
             e,
+            soldermask(),
           );
           break;
         case 'cpw':
@@ -176,6 +267,7 @@ export function PanelTransline(): JSX.Element {
             { widthM: v('w'), gapM: v('s'), heightM: v('h'), thicknessM: v('t'), lengthM: v('l') },
             e,
             type === 'gcpw',
+            soldermask(),
           );
           break;
         case 'rectwaveguide':
@@ -194,6 +286,7 @@ export function PanelTransline(): JSX.Element {
               lengthM: v('l'),
             },
             e,
+            soldermask(),
           );
           break;
         case 'stripline':
@@ -202,6 +295,36 @@ export function PanelTransline(): JSX.Element {
             e,
           );
           break;
+        case 'c_stripline': {
+          const cr = coupledStriplineAnalyze(
+            {
+              widthM: v('w'),
+              gapM: v('s'),
+              heightM: v('h'),
+              offsetAM: v('a'),
+              thicknessM: v('t'),
+              lengthM: v('l'),
+            },
+            e,
+          );
+          r = {
+            z0: Math.sqrt(cr.z0Even * cr.z0Odd),
+            epsEff: cr.epsEffEven,
+            angleDeg: cr.angleDeg,
+            conductorLossDb: 0.5 * (cr.attenCondEvenDb + cr.attenCondOddDb),
+            dielectricLossDb: 0.5 * (cr.attenDielEvenDb + cr.attenDielOddDb),
+            skinDepthM: cr.skinDepthM,
+            extra: {
+              z0Even: cr.z0Even,
+              z0Odd: cr.z0Odd,
+              zDiff: cr.zDiff,
+              zComm: cr.zComm,
+              coupling: cr.couplingK,
+            },
+          };
+          setZOdd(fmt(cr.z0Odd, 5));
+          break;
+        }
         case 'twistedpair':
           r = twistedPairAnalyze(
             { dinM: v('din'), doutM: v('dout'), twistsPerM: v('twists'), lengthM: v('l') },
@@ -210,7 +333,8 @@ export function PanelTransline(): JSX.Element {
           break;
       }
       setResult(r);
-      setZ0(fmt(type === 'c_microstrip' ? (r.extra?.zDiff ?? r.z0) : r.z0, 5));
+      if (type === 'c_stripline') setZ0(fmt(r.extra?.z0Even ?? r.z0, 5));
+      else setZ0(fmt(type === 'c_microstrip' ? (r.extra?.zDiff ?? r.z0) : r.z0, 5));
       setAngle(fmt(r.angleDeg, 5));
     } catch {
       setError('Analysis failed — check the input values.');
@@ -289,6 +413,29 @@ export function PanelTransline(): JSX.Element {
         if (s) next = { ...phys, w: s.widthM, l: s.lengthM };
         break;
       }
+      case 'c_stripline': {
+        // Joint (W, S) Newton solve for the Zeven/Zodd targets (KiCad default path).
+        const zOddTarget = parseNum(zOdd);
+        if (!(zOddTarget > 0)) {
+          setError('Enter a positive odd-mode impedance.');
+          return;
+        }
+        const s = coupledStriplineSynthesize(
+          {
+            widthM: v('w'),
+            gapM: v('s'),
+            heightM: v('h'),
+            offsetAM: v('a'),
+            thicknessM: v('t'),
+            lengthM: v('l'),
+          },
+          e,
+          zTarget,
+          zOddTarget,
+        );
+        if (s) next = { ...phys, w: s.widthM, s: s.gapM };
+        break;
+      }
       case 'twistedpair': {
         const s = twistedPairSynthesize(
           { dinM: v('din'), doutM: v('dout'), twistsPerM: v('twists'), lengthM: v('l') },
@@ -346,24 +493,111 @@ export function PanelTransline(): JSX.Element {
 
       <div className="calc-row">
         <Group title="Substrate parameters">
-          <Field
+          <PresetField
             label="Relative permittivity (εr):"
             value={sub.er}
             onChange={(val) => setSub({ ...sub, er: val })}
             unit=""
+            presets={RELATIVE_DIELECTRIC_CONSTANTS}
           />
-          <Field
+          <PresetField
             label="Loss tangent (tanδ):"
             value={sub.tand}
             onChange={(val) => setSub({ ...sub, tand: val })}
             unit=""
+            presets={LOSS_TANGENTS}
           />
-          <Field
-            label="Conductivity (σ):"
-            value={sub.sigma}
-            onChange={(val) => setSub({ ...sub, sigma: val })}
-            unit="S/m"
+          <PresetField
+            label="Specific resistance (ρ):"
+            value={sub.rho}
+            onChange={(val) => setSub({ ...sub, rho: val })}
+            unit="Ω·m"
+            presets={CONDUCTOR_RESISTIVITIES}
           />
+          <div
+            className="calc-field"
+            title={
+              "'Constant': εr and tan δ applied at all frequencies.\n" +
+              "'Djordjevic-Sarkar': causal wideband Debye anchored at the spec frequency."
+            }
+          >
+            <span className="calc-field-label">Dielectric model:</span>
+            <select
+              className="calc-select"
+              value={dielModel}
+              onChange={(e) => setDielModel(e.target.value as 'constant' | 'djordjevic_sarkar')}
+            >
+              <option value="constant">Constant</option>
+              <option value="djordjevic_sarkar">Djordjevic-Sarkar</option>
+            </select>
+          </div>
+          {dielModel === 'djordjevic_sarkar' && (
+            <NumField
+              label="εr, tanδ spec frequency:"
+              units={FREQ_UNITS}
+              base={specFreqHz}
+              onBase={setSpecFreqHz}
+            />
+          )}
+          {maskApplies && (
+            <>
+              <label
+                className="calc-field"
+                title={
+                  'Enable solder resist / LPI overlay correction.  Affects εeff, Z0, and ' +
+                  'dielectric loss for microstrip, coupled microstrip, CPW, and CBCPW.'
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={smPresent}
+                  onChange={(e) => setSmPresent(e.target.checked)}
+                />
+                <span className="calc-field-label">Solder mask present</span>
+              </label>
+              {smPresent && (
+                <>
+                  <NumField
+                    label="Mask thickness:"
+                    units={LEN_UNITS}
+                    defaultUnit="µm"
+                    base={smThickM}
+                    onBase={setSmThickM}
+                  />
+                  <Field
+                    label="Mask εr:"
+                    value={smEr}
+                    onChange={setSmEr}
+                    unit=""
+                    title="Mask relative permittivity. Default 3.5 for standard green LPI. Range 3.3-3.8 for typical resins."
+                  />
+                  <Field
+                    label="Mask tanδ:"
+                    value={smTand}
+                    onChange={setSmTand}
+                    unit=""
+                    title="Mask loss tangent. Default 0.025 for LPI."
+                  />
+                  {(type === 'cpw' || type === 'gcpw') && (
+                    <label
+                      className="calc-field"
+                      title={
+                        'Enable when the mask fills the CPW slots (standard LPI process).\n' +
+                        'Disable for selective mask that covers only the traces.'
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={smFills}
+                        onChange={(e) => setSmFills(e.target.checked)}
+                      />
+                      <span className="calc-field-label">Mask fills gaps</span>
+                    </label>
+                  )}
+                </>
+              )}
+            </>
+          )}
           <Field
             label="Conductor permeability (µ):"
             value={sub.mur}
@@ -406,11 +640,25 @@ export function PanelTransline(): JSX.Element {
 
         <Group title="Electrical parameters">
           <Field
-            label={isDiff ? 'Differential impedance (Zd):' : 'Characteristic impedance (Z0):'}
+            label={
+              type === 'c_stripline'
+                ? 'Even-mode impedance (Zeven):'
+                : isDiff
+                  ? 'Differential impedance (Zd):'
+                  : 'Characteristic impedance (Z0):'
+            }
             value={z0}
             onChange={setZ0}
             unit="Ω"
           />
+          {type === 'c_stripline' && (
+            <Field
+              label="Odd-mode impedance (Zodd):"
+              value={zOdd}
+              onChange={setZOdd}
+              unit="Ω"
+            />
+          )}
           <Field label="Electrical length:" value={angle} onChange={setAngle} unit="°" />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button type="button" className="calc-btn primary" onClick={analyze}>

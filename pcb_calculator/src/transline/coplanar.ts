@@ -2,10 +2,10 @@
  * Coplanar waveguide (with and without bottom ground) — faithful port of
  * KiCad's `transline_calculations/coplanar.cpp`. Quasi-static conformal mapping
  * (Ghione & Naldi) on AGM-based complete elliptic integrals, finite-thickness
- * correction (Gupta et al.), Gevorgian effective-permittivity dispersion and
- * Wheeler incremental-inductance conductor loss. The panel exposes no soldermask
- * or Djordjevic–Sarkar dielectric model, so those corrections take KiCad's
- * documented no-op paths and are omitted here.
+ * correction (Gupta et al.), Gevorgian effective-permittivity dispersion,
+ * Wheeler incremental-inductance conductor loss, and the optional solder mask
+ * overlay correction (Djordjevic–Sarkar dispersion is applied by the caller
+ * via `dispersedSubstrate`).
  * Counterpart: KiCad `common/transline_calculations/coplanar.cpp`.
  */
 
@@ -13,13 +13,22 @@ import {
   C0,
   LOG2DB,
   MU0,
+  type SoldermaskParams,
   type TcElectrical,
   ZF0,
-  ellipticK,
+  applySoldermaskCorrection,
+  coplanarSoldermaskDeltaQ,
+  ellipticIntegral,
   skinDepth,
   unitPropagationDelay,
 } from './tc_common.js';
 import type { TranslineAnalysis } from './transline.js';
+
+// KiCad's EllipticIntegral() interprets its argument as the *parameter* m
+// (b = sqrt(1 - arg)), yet the coplanar code passes the modulus k straight in.
+// The QA-pinned results (e.g. Z0 = 72.30 for the FR-4 vector) depend on that
+// convention, so mirror it exactly rather than using the classical K(k).
+const ellipticK = (arg: number): number => ellipticIntegral(arg)[0];
 
 export interface CoplanarPhysical {
   /** Centre-strip width W, m. */
@@ -43,6 +52,7 @@ export function coplanarAnalyze(
   phys: CoplanarPhysical,
   el: TcElectrical,
   withGround: boolean,
+  soldermask?: SoldermaskParams,
 ): CoplanarResult {
   const W = phys.widthM;
   const S = phys.gapM;
@@ -99,6 +109,31 @@ export function coplanarAnalyze(
     er0 = er0 - (0.7 * (er0 - 1.0) * T) / S / (q1 + (0.7 * T) / S);
   }
 
+  // Solder mask cover correction on the static er0; rescale the Z0 pre-factor
+  // so Z0 = zl_factor / sr_er_f stays self-consistent (KiCad COPLANAR::Analyse).
+  let tandEff = tand;
+  const uOverH = H > 0.0 ? W / H : 0.0;
+  const sm = applySoldermaskCorrection(
+    soldermask,
+    H,
+    er0,
+    tand,
+    epsr,
+    soldermask?.present
+      ? coplanarSoldermaskDeltaQ(
+          uOverH,
+          soldermask.thicknessM / H,
+          withGround,
+          soldermask.fillsGaps,
+        )
+      : 0.0,
+  );
+  if (sm.changed) {
+    zlFactor *= Math.sqrt(er0 / sm.epsEff);
+    er0 = sm.epsEff;
+    tandEff = sm.tanD;
+  }
+
   const srEr = Math.sqrt(epsr);
   const srEr0 = Math.sqrt(er0);
 
@@ -119,7 +154,7 @@ export function coplanarAnalyze(
   }
 
   const acFactor = ac / (4.0 * ZF0 * kk1 * kpk1 * (1.0 - k1 * k1));
-  const adFactor = (epsr / (epsr - 1.0)) * tand * Math.PI * (1.0 / C0);
+  const adFactor = (epsr / (epsr - 1.0)) * tandEff * Math.PI * (1.0 / C0);
 
   let srErF = srEr0;
   srErF += (srEr - srEr0) / (1.0 + G * (freq / fte) ** -1.8);

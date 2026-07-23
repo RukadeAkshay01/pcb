@@ -11,7 +11,16 @@
  */
 
 import { microstripAnalyze } from './microstrip.js';
-import { C0, LOG2DB, type TcElectrical, ZF0, skinDepth } from './tc_common.js';
+import {
+  C0,
+  LOG2DB,
+  type SoldermaskParams,
+  type TcElectrical,
+  ZF0,
+  applySoldermaskCorrection,
+  microstripSoldermaskDeltaQ,
+  skinDepth,
+} from './tc_common.js';
 import type { TranslineAnalysis } from './transline.js';
 
 export interface CoupledMicrostripPhysical {
@@ -312,11 +321,34 @@ function computeDispersion(
 export function coupledMicrostripAnalyze(
   phys: CoupledMicrostripPhysical,
   el: TcElectrical,
+  soldermask?: SoldermaskParams,
 ): CoupledMicrostripResult {
   const st = computeStatics(phys, el);
+  const er = el.epsilonR;
+
+  // Solder mask cover correction, per mode, before dispersion and losses
+  // (KiCad COUPLED_MICROSTRIP::Analyse): each mode's static εeff picks up its
+  // own correction and Z0 scales by √(uncoated/coated); the blended tan δ for
+  // losses is the even/odd average.
+  let tanDEff = el.tanD;
+  if (soldermask?.present) {
+    const uOverH = phys.widthM / phys.heightM;
+    const deltaQ = microstripSoldermaskDeltaQ(uOverH, soldermask.thicknessM / phys.heightM);
+    const smE = applySoldermaskCorrection(soldermask, phys.heightM, st.erEffE0, el.tanD, er, deltaQ);
+    const smO = applySoldermaskCorrection(soldermask, phys.heightM, st.erEffO0, el.tanD, er, deltaQ);
+    if (smE.changed) {
+      st.z0E0 *= Math.sqrt(st.erEffE0 / smE.epsEff);
+      st.erEffE0 = smE.epsEff;
+    }
+    if (smO.changed) {
+      st.z0O0 *= Math.sqrt(st.erEffO0 / smO.epsEff);
+      st.erEffO0 = smO.epsEff;
+    }
+    tanDEff = 0.5 * (smE.tanD + smO.tanD);
+  }
+
   const fr = computeDispersion(phys, el, st);
   const len = phys.lengthM;
-  const er = el.epsilonR;
   const delta = skinDepth(el);
 
   // conductor_losses() (ROUGH = 0).
@@ -341,13 +373,13 @@ export function coupledMicrostripAnalyze(
     (el.frequencyHz / C0) *
     (er / Math.sqrt(st.erEffE0)) *
     ((st.erEffE0 - 1.0) / (er - 1.0)) *
-    el.tanD;
+    tanDEff;
   const alphaDo =
     LOG2DB *
     (el.frequencyHz / C0) *
     (er / Math.sqrt(st.erEffO0)) *
     ((st.erEffO0 - 1.0) / (er - 1.0)) *
-    el.tanD;
+    tanDEff;
   const attenDielE = alphaDe * len;
   const attenDielO = alphaDo * len;
 
