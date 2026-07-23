@@ -107,7 +107,15 @@ export function CalculatorTools({ onExitToHome }: { onExitToHome: () => void }):
 
   return (
     <div className="calc-frame ze-app">
-      <MenuBar menus={menus} title="Calculator Tools" />
+      <MenuBar
+        menus={menus}
+        leftSlot={
+          <div className="ze-home-link" onClick={onExitToHome} title="Back to project manager">
+            ⌂ ZiroEDA
+          </div>
+        }
+        title="Calculator Tools"
+      />
       <div className="calc-body">
         <nav className="calc-tree" data-testid="calc-tree">
           {TREE.map((group) => (
