@@ -3886,7 +3886,20 @@ export function PcbEditor({
           </>
         }
       />
-      <Toolbar entries={PCB_TOP_TOOLBAR} orientation="horizontal" onActivate={onTopAction} />
+      <Toolbar
+        entries={PCB_TOP_TOOLBAR}
+        orientation="horizontal"
+        onActivate={onTopAction}
+        trailing={
+          <select
+            disabled
+            title="Current variant (design variants are staged)"
+            style={{ marginLeft: 4 }}
+          >
+            <option>Default</option>
+          </select>
+        }
+      />
 
       {/* TOP_AUX bar (toolbars_pcb_editor.cpp TOOLBAR_LOC::TOP_AUX): track
           width + auto-width | via size | layer selector + layer pair | grid |

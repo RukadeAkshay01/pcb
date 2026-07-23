@@ -57,11 +57,13 @@ export const PCB_TOP_TOOLBAR: ToolEntry[] = [
   { id: 'runDRC', icon: 'runDRC', title: 'Design Rules Checker' },
   sep,
   { id: 'showEeschema', icon: 'showEeschema', title: 'Open schematic in Schematic Editor' },
-  // PCB_ACTION_TOOLBAR_CONTROLS::currentVariant + ACTION_TOOLBAR_CONTROLS::
-  // ipcScripting close the bar (greyed: variants and the IPC API are staged).
-  { id: 'currentVariant', icon: 'currentVariant', title: 'Design variant', ...todo },
-  { id: 'ipcScripting', icon: 'ipcScripting', title: 'IPC API scripting console', ...todo },
 ];
+
+// PCB_ACTION_TOOLBAR_CONTROLS::currentVariant closes TOP_MAIN as a CHOICE
+// control (not a bitmap button) and ACTION_TOOLBAR_CONTROLS::ipcScripting is
+// a region for plugin buttons — empty (invisible) until plugins register,
+// exactly like plugin-less KiCad. The editor renders the variant dropdown as
+// the toolbar's trailing control.
 
 /** LEFT (view options) toolbar. */
 export const PCB_LEFT_TOOLBAR: ToolEntry[] = [

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { Icon } from './icons.js';
 import { toolbarIconUrl } from './toolbarIcons.js';
 
@@ -39,6 +39,8 @@ interface Props {
    *  on top of a button's own static `disabled` flag. */
   disabledIds?: ReadonlySet<string>;
   onActivate?: (id: string) => void;
+  /** Rendered after the buttons — toolbar CONTROLS (choices etc.). */
+  trailing?: ReactNode;
 }
 
 // The time between pressing the left mouse button and opening the palette
@@ -62,6 +64,7 @@ export function Toolbar({
   toggled,
   disabledIds,
   onActivate,
+  trailing,
 }: Props): JSX.Element {
   // Selected ("default") action of each group, like ACTION_GROUP's
   // m_defaultAction: the palette pick the group button currently shows.
@@ -195,6 +198,7 @@ export function Toolbar({
         }
         return renderButton(e);
       })}
+      {trailing}
       {palette && (
         <div
           className={`ze-tb-palette ${orientation === 'vertical' ? 'horizontal' : 'vertical'}`}
