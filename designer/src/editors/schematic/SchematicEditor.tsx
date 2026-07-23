@@ -950,22 +950,37 @@ export function SchematicEditor({
     return noExt || doc?.titleBlock?.title || 'schematic';
   }, [currentFile, fileName, doc]);
 
+  // Drawing defaults shared by every output (screen, print, plot), derived
+  // from Schematic Setup > Formatting the way SCH_RENDER_SETTINGS is seeded
+  // from SCHEMATIC_SETTINGS upstream (eeschema_config.cpp).
+  const drawingDefaults = useMemo(
+    () => ({
+      junctionDiameterIU: junctionDotDiameterIU(setup),
+      dashLengthRatio: setup.formatting.dashLengthRatio,
+      gapLengthRatio: setup.formatting.gapLengthRatio,
+      // The panel stores percent (KiCad UI convention); the ratio is /100.
+      textOffsetRatio: setup.formatting.labelOffsetRatio / 100,
+    }),
+    [setup],
+  );
+
   // Print (DIALOG_PRINT): render the current sheet and open the browser print
   // flow, optionally with a different colour theme (m_useColorTheme choice).
   const doPrint = useCallback(
     (opts: PlotOpts, themeId?: string) => {
       const printTheme =
         themeId && BUILTIN_THEMES[themeId] ? BUILTIN_THEMES[themeId]!.theme : theme;
-      // Junction dots print at their Schematic Setup size, like the screen.
+      // Junction dots, dash ratios and label offsets print at their Schematic
+      // Setup sizes, like the screen.
       const o: PlotOpts = {
         ...opts,
-        junctionDiameterIU: junctionDotDiameterIU(setup),
+        ...drawingDefaults,
         ...(activeSheet ? { sheet: activeSheet } : {}),
       };
       if (doc) printSheet(doc, printTheme, o, outputBaseName());
       setPrintOpen(false);
     },
-    [doc, theme, outputBaseName, activeSheet, setup],
+    [doc, theme, outputBaseName, activeSheet, drawingDefaults],
   );
 
   // Print Preview (DIALOG_PRINT's Apply / OnPrintPreview): render into a new tab
@@ -976,12 +991,12 @@ export function SchematicEditor({
         themeId && BUILTIN_THEMES[themeId] ? BUILTIN_THEMES[themeId]!.theme : theme;
       const o: PlotOpts = {
         ...opts,
-        junctionDiameterIU: junctionDotDiameterIU(setup),
+        ...drawingDefaults,
         ...(activeSheet ? { sheet: activeSheet } : {}),
       };
       if (doc) printSheet(doc, printTheme, o, outputBaseName(), true);
     },
-    [doc, theme, outputBaseName, activeSheet, setup],
+    [doc, theme, outputBaseName, activeSheet, drawingDefaults],
   );
 
   // Bulk Edit Symbol Fields: apply the changed cells per sheet — the current
@@ -1022,7 +1037,7 @@ export function SchematicEditor({
       const plotTheme = themeId && BUILTIN_THEMES[themeId] ? BUILTIN_THEMES[themeId]!.theme : theme;
       const o: PlotOpts = {
         ...opts,
-        junctionDiameterIU: junctionDotDiameterIU(setup),
+        ...drawingDefaults,
         ...(activeSheet ? { sheet: activeSheet } : {}),
       };
       const one = (d: Schematic, name: string): void => {
@@ -1036,7 +1051,7 @@ export function SchematicEditor({
       } else if (doc) one(doc, outputBaseName());
       setPlotOpen(false);
     },
-    [doc, theme, outputBaseName, liveDocs, activeSheet, setup],
+    [doc, theme, outputBaseName, liveDocs, activeSheet, drawingDefaults],
   );
   useEffect(() => {
     // Changed search settings restart the scan (upstream m_foundItemHighlight reset).
@@ -1632,9 +1647,9 @@ export function SchematicEditor({
       // Default pen for zero-width strokes = Schematic Setup > Formatting's
       // "Default line width" (SCHEMATIC_SETTINGS::m_DefaultLineWidth), mils→IU.
       defaultPenIU: mmToIU((setup.formatting.defaultLineWidthMils * 25.4) / 1000),
-      // Junction-dot size from Formatting's choice × Default-netclass wire
-      // width (SCHEMATIC_SETTINGS::GetJunctionSize); ≤1 IU = "None", no dots.
-      junctionDiameterIU: junctionDotDiameterIU(setup),
+      // Junction-dot size, dash ratios and label/pin text offsets from
+      // Schematic Setup > Formatting (SCH_RENDER_SETTINGS seeding).
+      ...drawingDefaults,
       selectionThicknessMils: es.selection.thickness,
       highlightThicknessMils: es.selection.highlight_thickness,
       grid: {
@@ -1660,7 +1675,7 @@ export function SchematicEditor({
         },
       },
     }),
-    [es, activeSheet, setup],
+    [es, activeSheet, setup, drawingDefaults],
   );
 
   const inputPrefs = useMemo<InputPrefs>(

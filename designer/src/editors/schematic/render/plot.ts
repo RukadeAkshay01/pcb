@@ -35,6 +35,11 @@ export interface PlotOpts {
   /** Effective junction-dot diameter (IU) from the schematic settings
    *  (SCHEMATIC_SETTINGS::GetJunctionSize()), so plots match the screen. */
   junctionDiameterIU?: number;
+  /** Dashed-line dash / gap ratios and the label/pin text lift ratio from the
+   *  schematic settings (m_DashedLine*Ratio, m_TextOffsetRatio). */
+  dashLengthRatio?: number;
+  gapLengthRatio?: number;
+  textOffsetRatio?: number;
 }
 
 /** An all-black-on-white theme for monochrome output (KiCad's B&W plot). */
@@ -99,6 +104,9 @@ function outputRenderOpts(opts: PlotOpts): RenderOpts {
     ...(opts.sheet ? { drawingSheet: opts.sheet } : {}),
     defaultPenIU: opts.defaultPenIU,
     junctionDiameterIU: opts.junctionDiameterIU,
+    dashLengthRatio: opts.dashLengthRatio,
+    gapLengthRatio: opts.gapLengthRatio,
+    textOffsetRatio: opts.textOffsetRatio,
     selectionThicknessMils: 0,
     highlightThicknessMils: 0,
     grid: { show: false, sizeIU: 12700, style: 'dots', lineWidthPx: 1, minSpacingPx: 10 },
