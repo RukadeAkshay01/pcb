@@ -89,6 +89,8 @@ import {
   itemRefById,
   schPropertiesFor,
   type PropRow,
+  getMsgPanelItems,
+  type MsgPanelItem,
 } from '@ziroeda/eeschema';
 import {
   SchematicCanvas,
@@ -2458,6 +2460,18 @@ export function SchematicEditor({
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [doc]);
 
+  // Message-panel rows (EDA_MSG_PANEL): exactly one selected item shows its
+  // GetMsgPanelInfo; empty and multi-selections clear the panel.
+  const msgPanelItems = useMemo<MsgPanelItem[]>(() => {
+    if (!doc || selection.size !== 1) return [];
+    const id = [...selection][0]!;
+    const ref = itemRefById(doc, id);
+    if (!ref) return [];
+    const code = netlist?.netByItem.get(id);
+    const net = code !== undefined ? netlist?.nets.find((n) => n.code === code) : undefined;
+    return getMsgPanelItems(doc, libById, ref, fmt, net?.name ?? null);
+  }, [doc, selection, libById, netlist, fmt]);
+
   // Parse a distance typed into the grid, in the current units, back to IU.
   const parseDist = (text: string): number | null => {
     const n = Number(text.trim());
@@ -2897,7 +2911,26 @@ export function SchematicEditor({
         />
       </div>
 
+      {/* EDA_DRAW_FRAME hosts a message panel above the 8-field status bar:
+          a single selected item's GetMsgPanelInfo rows; anything else clears
+          it (SCH_INSPECTION_TOOL::UpdateMessagePanel). */}
+      <div className="ze-msgpanel" data-testid="sch-message-panel">
+        {msgPanelItems.map((item) => (
+          <div className="ze-msgpanel-item" key={`${item.upper}:${item.lower}`}>
+            <div className="ze-msgpanel-upper">{item.upper}</div>
+            <div className="ze-msgpanel-lower">{item.lower || ' '}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* KISTATUSBAR's 8 fields (eda_draw_frame.cpp): message (grows) — the
+          net-highlight text lands here (UpdateNetHighlightStatus) | Z zoom |
+          absolute X/Y | relative dx/dy/dist | grid | units | current-tool
+          (grows) | constraint (unused by eeschema). */}
       <div className="ze-statusbar">
+        <span className="cell msg" data-testid="sch-status-msg">
+          {highlightName ? `Highlighted net: ${highlightName}` : ''}
+        </span>
         <span className="cell">
           Z {Number.isFinite(zoomPct) ? (zoomPct / 100).toFixed(2) : '1.00'}
         </span>
@@ -2920,12 +2953,11 @@ export function SchematicEditor({
                 : (mm / 25.4).toFixed(4);
           })()}
         </span>
-        <span className="cell">{highlightName ? `Net: ${highlightName}` : ''}</span>
-        <span className="cell grow">{units}</span>
-        <span className="cell" title="build">
-          {__BUILD_STAMP__}
+        <span className="cell">{units === 'in' ? 'inches' : units}</span>
+        <span className="cell tool" data-testid="sch-tool-msg">
+          {SCH_TOOL_MSGS[activeTool] ?? ''}
         </span>
-        <span className="cell">{SCH_TOOL_MSGS[activeTool] ?? ''}</span>
+        <span className="cell constraint" />
       </div>
 
       {chooserOpen && (

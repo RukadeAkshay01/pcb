@@ -10,6 +10,7 @@ export * from './cleanup.js';
 export * from './junction_helpers.js';
 export * from './sch_collectors.js';
 export * from './sch_properties_panel.js';
+export * from './msg_panel.js';
 export * from './build.js';
 export * from './build-graphics.js';
 export * from './mutate.js';
