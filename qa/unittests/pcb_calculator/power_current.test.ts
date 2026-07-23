@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   awgDiameterM,
-  cableSize,
+  cableRadiusFromAmpacity,
+  cableRadiusFromArea,
+  cableRadiusFromDiameter,
+  cableRadiusFromFrequency,
+  cableRadiusFromLinResistance,
+  cableRadiusFromPower,
+  cableRadiusFromResistanceDc,
+  cableRadiusFromVDrop,
+  cableUpdateAll,
   fusingCurrent,
   ipc2221CurrentA,
   ipc2221RowForVoltage,
@@ -150,35 +158,41 @@ describe('cable size', () => {
     expect(nearestAwgIndex(awgDiameterM(24))).toBe(27);
   });
 
+  const CU = { rho20: 1.72e-8, alpha: 3.93e-3, ampPerMm2: 3, currentA: 10, lengthM: 1 };
+
   it('AWG 10 is ~3.28 mΩ/m at 20 °C', () => {
-    const r = cableSize({
-      diameterM: awgDiameterM(10),
-      conductorTempC: 20,
-      currentDensity: 3,
-      currentA: 10,
-      lengthM: 1,
-    });
-    expect(r.resPerMeter20 * 1000).toBeGreaterThan(3.0);
-    expect(r.resPerMeter20 * 1000).toBeLessThan(3.6);
-    expect(r.voltageDrop).toBeCloseTo(r.resistanceOhm * 10, 9);
-    expect(r.powerLossW).toBeCloseTo(r.voltageDrop * 10, 9);
+    const s = cableUpdateAll(awgDiameterM(10) / 2, { ...CU, temperatureC: 20 });
+    expect(s.linearResistance * 1000).toBeGreaterThan(3.0);
+    expect(s.linearResistance * 1000).toBeLessThan(3.6);
+    expect(s.voltageDropV).toBeCloseTo(s.resistanceDcOhm * 10, 9);
+    expect(s.dissipatedPowerW).toBeCloseTo(s.voltageDropV * 10, 9);
   });
 
   it('resistance rises with temperature', () => {
-    const cold = cableSize({
-      diameterM: 1e-3,
-      conductorTempC: 20,
-      currentDensity: 3,
-      currentA: 1,
-      lengthM: 1,
-    });
-    const hot = cableSize({
-      diameterM: 1e-3,
-      conductorTempC: 100,
-      currentDensity: 3,
-      currentA: 1,
-      lengthM: 1,
-    });
-    expect(hot.resPerMeter).toBeGreaterThan(cold.resPerMeter * 1.25);
+    const cold = cableUpdateAll(0.5e-3, { ...CU, currentA: 1, temperatureC: 20 });
+    const hot = cableUpdateAll(0.5e-3, { ...CU, currentA: 1, temperatureC: 100 });
+    expect(hot.linearResistance).toBeGreaterThan(cold.linearResistance * 1.25);
+  });
+
+  it('every inverse solver round-trips the radius (KiCad linked fields)', () => {
+    const p = { ...CU, temperatureC: 20, currentA: 1 };
+    const s = cableUpdateAll(0.5e-3, p);
+    expect(cableRadiusFromDiameter(s.diameterM)).toBeCloseTo(0.5e-3, 12);
+    expect(cableRadiusFromArea(s.areaM2)).toBeCloseTo(0.5e-3, 12);
+    expect(cableRadiusFromLinResistance(s.linearResistance, s.rhoHot)).toBeCloseTo(0.5e-3, 12);
+    expect(cableRadiusFromFrequency(s.maxFrequencyHz, s.rhoHot)).toBeCloseTo(0.5e-3, 12);
+    expect(cableRadiusFromAmpacity(s.ampacityA, p.ampPerMm2)).toBeCloseTo(0.5e-3, 12);
+    expect(cableRadiusFromResistanceDc(s.resistanceDcOhm, s.rhoHot, p.lengthM)).toBeCloseTo(
+      0.5e-3,
+      12,
+    );
+    expect(cableRadiusFromVDrop(s.voltageDropV, s.rhoHot, p.lengthM, p.currentA)).toBeCloseTo(
+      0.5e-3,
+      12,
+    );
+    expect(cableRadiusFromPower(s.dissipatedPowerW, s.rhoHot, p.lengthM, p.currentA)).toBeCloseTo(
+      0.5e-3,
+      12,
+    );
   });
 });

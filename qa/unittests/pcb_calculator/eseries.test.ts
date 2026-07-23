@@ -4,9 +4,9 @@ import {
   E24_VALUES,
   E96_VALUES,
   ESeriesId,
-  calculateResistorSubstitution,
   eseriesInRange,
   eseriesNearest,
+  resEquivCalc,
 } from '@ziroeda/pcb_calculator';
 
 describe('eseries tables', () => {
@@ -31,44 +31,46 @@ describe('eseries tables', () => {
   });
 });
 
-describe('resistor substitution', () => {
-  it('returns an exact single when the target is in-series', () => {
-    const r = calculateResistorSubstitution(4700, ESeriesId.E24)!;
-    expect(r.r1.value).toBe(4700);
-    expect(r.r1.deviationPct).toBe(0);
+describe('resistor substitution (RES_EQUIV_CALC port)', () => {
+  it('finds an exact 2R for an in-series decade pair', () => {
+    // 14.7k from E12: 12k + 2.7k exactly; s3r/s4r absent (KiCad "Not worth using").
+    const r = resEquivCalc(14700, ESeriesId.E12)!;
+    expect(r.s2r.value).toBe(14700);
+    expect(r.s3r).toBeUndefined();
+    expect(r.s4r).toBeUndefined();
   });
 
   it('improves (or matches) accuracy with more resistors', () => {
-    const r = calculateResistorSubstitution(3456, ESeriesId.E12)!;
-    const e1 = Math.abs(r.r1.deviationPct);
-    const e2 = Math.abs(r.r2.deviationPct);
-    const e3 = Math.abs(r.r3.deviationPct);
-    const e4 = Math.abs(r.r4.deviationPct);
-    expect(e2).toBeLessThanOrEqual(e1);
+    const r = resEquivCalc(3456, ESeriesId.E12, [3456])!;
+    const e2 = Math.abs(r.s2r.value - 3456);
+    expect(r.s3r).toBeDefined();
+    const e3 = Math.abs(r.s3r!.value - 3456);
     expect(e3).toBeLessThanOrEqual(e2);
-    expect(e4).toBeLessThanOrEqual(e3);
-    // 4 E12 resistors should get well under 0.1 %.
-    expect(e4).toBeLessThan(0.1);
+    if (r.s4r) expect(Math.abs(r.s4r.value - 3456)).toBeLessThanOrEqual(e3);
   });
 
-  it('finds the classic series pair', () => {
-    // 14.7k from E12: e.g. 12k + 2.7k = 14.7k exactly.
-    const r = calculateResistorSubstitution(14700, ESeriesId.E12)!;
-    expect(Math.abs(r.r2.deviationPct)).toBeLessThan(1e-9);
+  it('finds the exact 4R network KiCad finds for 4321.9 Ω on E24', () => {
+    const r = resEquivCalc(4321.9, ESeriesId.E24, [4321.9])!;
+    expect(r.s4r).toBeDefined();
+    expect(r.s4r!.value).toBeCloseTo(4321.9, 9);
   });
 
-  it('rejects nonsense input', () => {
-    expect(calculateResistorSubstitution(-5, ESeriesId.E24)).toBeNull();
-    expect(calculateResistorSubstitution(Number.NaN, ESeriesId.E24)).toBeNull();
+  it('uses KiCad notation for names', () => {
+    const r = resEquivCalc(14700, ESeriesId.E12)!;
+    // "12K + 2K7" (order per the sorted 2R buffer construction).
+    expect(r.s2r.name).toMatch(/K/);
+    expect(r.s2r.parts).toHaveLength(2);
+  });
+
+  it('rejects out-of-range series id', () => {
+    expect(resEquivCalc(4700, ESeriesId.E96)).toBeNull();
+    expect(resEquivCalc(Number.NaN, ESeriesId.E24)?.s2r.value).toBeUndefined();
   });
 
   it('honours excluded values', () => {
-    // 4700 is exact in E24; excluding 4.7k (all decades) forces a worse single.
-    const excl = calculateResistorSubstitution(4700, ESeriesId.E24, [4700])!;
-    expect(excl.r1.value).not.toBe(4700);
-    // The excluded mantissa must not appear as a single-resistor pick.
-    expect(Math.round(excl.r1.value)).not.toBe(4700);
-    // A multi-resistor network can still approach the target closely.
-    expect(Math.abs(excl.r4.deviationPct)).toBeLessThan(2);
+    // Excluding 4.7k removes it from every combination's parts.
+    const excl = resEquivCalc(4700, ESeriesId.E24, [4700])!;
+    expect(excl.s2r.parts).not.toContain(4700);
+    expect(excl.s3r === undefined || !excl.s3r.parts.includes(4700)).toBe(true);
   });
 });
