@@ -94,23 +94,29 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
     const scene = buildScene(board);
     const bbox = scene.bbox;
     const pxPerIU = DPI / 25.4 / MM;
+    // BOARD_PRINTOUT::DrawPage: the view always looks at the centre of the
+    // drawing area (gal->SetLookAtPoint(drawingAreaBBox.Centre())) — 1:1 and
+    // Custom only change the scale, never the centring.
     const pageView = (): { scale: number; tx: number; ty: number; flipX: boolean } => {
+      let s: number;
       if (scaleMode === 'fit' && bbox) {
         const margin = 10 * MM;
-        const s = Math.min(
+        s = Math.min(
           pxW / (bbox.maxX - bbox.minX + margin * 2),
           pxH / (bbox.maxY - bbox.minY + margin * 2),
         );
-        return {
-          scale: s,
-          flipX: mirrored,
-          tx: pxW / 2 - ((bbox.minX + bbox.maxX) / 2) * (mirrored ? -s : s),
-          ty: pxH / 2 - ((bbox.minY + bbox.maxY) / 2) * s,
-        };
+      } else {
+        const k = scaleMode === 'custom' ? Number(customScale) || 1 : 1;
+        s = pxPerIU * k;
       }
-      const k = scaleMode === 'custom' ? Number(customScale) || 1 : 1;
-      const s = pxPerIU * k;
-      return { scale: s, flipX: mirrored, tx: mirrored ? pxW : 0, ty: 0 };
+      const cx = bbox ? (bbox.minX + bbox.maxX) / 2 : 0;
+      const cy = bbox ? (bbox.minY + bbox.maxY) / 2 : 0;
+      return {
+        scale: s,
+        flipX: mirrored,
+        tx: pxW / 2 - cx * (mirrored ? -s : s),
+        ty: pxH / 2 - cy * s,
+      };
     };
 
     const opts: PcbDrawOptions = {
@@ -171,14 +177,14 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
 
   return (
     <div className="ze-modal-backdrop" onMouseDown={onClose}>
-      <div className="ze-modal" style={{ width: 560 }} onMouseDown={(e) => e.stopPropagation()}>
+      <div className="ze-modal" style={{ width: 700 }} onMouseDown={(e) => e.stopPropagation()}>
         <div className="ze-modal-header">
           Print
           <span className="x" onClick={onClose}>
             ✕
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 12, padding: 12 }}>
+        <div style={{ display: 'flex', gap: 12, padding: 12, whiteSpace: 'nowrap' }}>
           <fieldset style={{ minWidth: 200 }}>
             <legend>Include Layers</legend>
             <div
