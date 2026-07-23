@@ -87,6 +87,9 @@ export interface PcbDrawOptions {
   /** Paint every layer in this color — the net-color overlay pass
    *  (net colors mode "All": copper items tinted with their net's color). */
   colorOverride?: string;
+  /** Print's drill-marks mode: 'none' hides holes ('small' renders as real —
+   *  hole geometry is pre-baked in the scene). Default: real. */
+  drillMarks?: 'none' | 'small' | 'real';
 }
 
 /** KiCad defaults (project_local_settings.cpp + s_objectSettings). */
@@ -1309,6 +1312,8 @@ export function buildDrawSteps(
   for (let i = 0; i <= fCuIndex; i++) pushLayer(PCB_PAINT_ORDER[i]!);
 
   steps.push(() => {
+    // Print's "Drill marks: No drill mark" suppresses every hole.
+    if (opts.drillMarks === 'none') return;
     if (opts.pads) {
       ctx.fillStyle = sp(PCB_SPECIAL.padHoleWall);
       ctx.fill(scene.padHoleWalls);

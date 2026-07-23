@@ -39,18 +39,20 @@ interface Props {
 
 export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Props): JSX.Element {
   const layerNames = board.layers.map((l) => l.name);
+  const displayName = new Map(board.layers.map((l) => [l.name, l.userName ?? l.name]));
   const [checked, setChecked] = useState<Set<string>>(
     () => new Set(layerNames.filter((l) => visibleLayers.has(l))),
   );
   const [bw, setBw] = useState(false);
-  const [sheet, setSheet] = useState(true);
-  const [useObjectsTab, setUseObjectsTab] = useState(true);
+  const [sheet, setSheet] = useState(false);
+  const [useObjectsTab, setUseObjectsTab] = useState(false);
   const [background, setBackground] = useState(false);
   const [mirrored, setMirrored] = useState(false);
   const [onePerLayer, setOnePerLayer] = useState(false);
   const [edgesAllPages, setEdgesAllPages] = useState(true);
-  const [scaleMode, setScaleMode] = useState<'1:1' | 'fit' | 'custom'>('fit');
+  const [scaleMode, setScaleMode] = useState<'1:1' | 'fit' | 'custom'>('1:1');
   const [customScale, setCustomScale] = useState('1.0');
+  const [drillMarks, setDrillMarks] = useState<'none' | 'small' | 'real'>('real');
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   const toggle = (name: string): void =>
@@ -116,6 +118,7 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
       ...(useObjectsTab ? {} : { tracks: true, vias: true, pads: true, zones: true }),
       drawingSheet: sheet,
       contrastMode: 'normal',
+      drillMarks,
       ...(bw ? { colorOverride: 'rgb(0,0,0)' } : {}),
     };
 
@@ -187,7 +190,8 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
             >
               {layerNames.map((l) => (
                 <label key={l} style={{ display: 'block' }}>
-                  <input type="checkbox" checked={checked.has(l)} onChange={() => toggle(l)} /> {l}
+                  <input type="checkbox" checked={checked.has(l)} onChange={() => toggle(l)} />{' '}
+                  {displayName.get(l) ?? l}
                 </label>
               ))}
             </div>
@@ -232,12 +236,22 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
                 />{' '}
                 Print background color
               </label>
-              <label
-                style={{ display: 'block', opacity: 0.5 }}
-                title="Staged: holes always print at real size"
-              >
+              <label style={{ display: 'block', opacity: 0.5 }} title="Print themes are staged">
+                <input type="checkbox" disabled /> Use a different color theme for printing:{' '}
+                <select disabled>
+                  <option>KiCad Default</option>
+                </select>
+              </label>
+              <label style={{ display: 'block' }}>
                 Drill marks:{' '}
-                <select disabled value="real">
+                <select
+                  value={drillMarks}
+                  onChange={(e) => setDrillMarks(e.target.value as 'none' | 'small' | 'real')}
+                >
+                  <option value="none">No drill mark</option>
+                  <option value="small" disabled title="Staged: renders as real drill">
+                    Small mark
+                  </option>
                   <option value="real">Real drill</option>
                 </select>
               </label>
@@ -307,11 +321,11 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
           <button type="button" disabled style={{ marginRight: 'auto', opacity: 0.5 }}>
             Page Setup...
           </button>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
           <button type="button" className="primary" onClick={print}>
             Print
-          </button>
-          <button type="button" onClick={onClose}>
-            Cancel
           </button>
         </div>
         {menu && (
