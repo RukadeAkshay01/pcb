@@ -249,9 +249,7 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
                   onChange={(e) => setDrillMarks(e.target.value as 'none' | 'small' | 'real')}
                 >
                   <option value="none">No drill mark</option>
-                  <option value="small" disabled title="Staged: renders as real drill">
-                    Small mark
-                  </option>
+                  <option value="small">Small mark</option>
                   <option value="real">Real drill</option>
                 </select>
               </label>
@@ -318,9 +316,6 @@ export function DialogPcbPrint({ board, visibleLayers, drawOpts, onClose }: Prop
         {/* DIALOG_PRINT_GENERIC's button row: Page Setup… on the left, then
             Print / Cancel (Print Preview is staged). */}
         <div className="ze-modal-footer">
-          <button type="button" disabled style={{ marginRight: 'auto', opacity: 0.5 }}>
-            Page Setup...
-          </button>
           <button type="button" onClick={onClose}>
             Close
           </button>
