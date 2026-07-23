@@ -3,8 +3,10 @@
  * toolbars_sch_editor.cpp` (SCH_EDIT_TOOLBAR_SETTINGS::DefaultToolbarConfig),
  * transcribed exactly for the project-manager case (our editors always live
  * under the launcher, like KiCad frames under the project manager — so no
- * New/Open on the top toolbar). Separators mark AppendSeparator groups; a
- * TOOLBAR_GROUP_CONFIG palette renders flat, in group order, for now.
+ * New/Open on the top toolbar). Separators mark AppendSeparator groups;
+ * TOOLBAR_GROUP_CONFIG entries render as ACTION_GROUP buttons — one visible
+ * action with a corner triangle, long-press (or click, for option radio
+ * groups) opening the palette with the rest.
  *
  * Titles are the upstream action FriendlyNames with the default hotkey in
  * parentheses, matching KiCad's tooltips. Buttons whose feature is not
@@ -74,32 +76,52 @@ export const LEFT_TOOLBAR: ToolEntry[] = [
     title: 'Grid Overrides (Ctrl+Shift+G)',
     toggle: true,
   },
-  { id: 'unitsInches', icon: 'unitIn', title: 'Inches', toggle: true },
-  { id: 'unitsMils', icon: 'unitMils', title: 'Mils', toggle: true },
-  { id: 'unitsMm', icon: 'unitMm', title: 'Millimeters', toggle: true },
-  { id: 'crosshairSmall', icon: 'crosshairSmall', title: 'Small crosshairs', toggle: true },
-  { id: 'crosshairFull', icon: 'crosshairFull', title: 'Full-Window Crosshairs', toggle: true },
-  { id: 'crosshair45', icon: 'crosshair45', title: '45 Degree Crosshairs', toggle: true },
+  // TOOLBAR_GROUP_CONFIG entries render as one button + long-press palette
+  // (ACTION_TOOLBAR); group titles as in SCH_EDIT_TOOLBAR_SETTINGS.
+  {
+    group: 'Units',
+    paletteOnClick: true,
+    actions: [
+      { id: 'unitsInches', icon: 'unitIn', title: 'Inches', toggle: true },
+      { id: 'unitsMils', icon: 'unitMils', title: 'Mils', toggle: true },
+      { id: 'unitsMm', icon: 'unitMm', title: 'Millimeters', toggle: true },
+    ],
+  },
+  {
+    group: 'Crosshair modes',
+    paletteOnClick: true,
+    actions: [
+      { id: 'crosshairSmall', icon: 'crosshairSmall', title: 'Small crosshairs', toggle: true },
+      { id: 'crosshairFull', icon: 'crosshairFull', title: 'Full-Window Crosshairs', toggle: true },
+      { id: 'crosshair45', icon: 'crosshair45', title: '45 Degree Crosshairs', toggle: true },
+    ],
+  },
   sep,
   { id: 'toggleHiddenPins', icon: 'hiddenPins', title: 'Show Hidden Pins', toggle: true },
   sep,
   {
-    id: 'lineModeFree',
-    icon: 'lineFree',
-    title: 'Line Mode for Wires and Buses: free angle',
-    toggle: true,
-  },
-  {
-    id: 'lineMode90',
-    icon: 'line90',
-    title: 'Line Mode for Wires and Buses: 90°',
-    toggle: true,
-  },
-  {
-    id: 'lineMode45',
-    icon: 'line45',
-    title: 'Line Mode for Wires and Buses: 45°',
-    toggle: true,
+    group: 'Line modes',
+    paletteOnClick: true,
+    actions: [
+      {
+        id: 'lineModeFree',
+        icon: 'lineFree',
+        title: 'Line Mode for Wires and Buses: free angle',
+        toggle: true,
+      },
+      {
+        id: 'lineMode90',
+        icon: 'line90',
+        title: 'Line Mode for Wires and Buses: 90°',
+        toggle: true,
+      },
+      {
+        id: 'lineMode45',
+        icon: 'line45',
+        title: 'Line Mode for Wires and Buses: 45°',
+        toggle: true,
+      },
+    ],
   },
   sep,
   { id: 'annotateAuto', icon: 'annotateAuto', title: 'Annotate Automatically', toggle: true },
@@ -110,8 +132,13 @@ export const LEFT_TOOLBAR: ToolEntry[] = [
 
 /** Right vertical toolbar (TOOLBAR_LOC::RIGHT — drawing/placement tools). */
 export const RIGHT_TOOLBAR: ToolEntry[] = [
-  { id: 'select', icon: 'selectRect', title: 'Select item(s): Rectangle' },
-  { id: 'selectLasso', icon: 'selectLasso', title: 'Select item(s): Lasso' },
+  {
+    group: 'Selection modes',
+    actions: [
+      { id: 'select', icon: 'selectRect', title: 'Select item(s): Rectangle' },
+      { id: 'selectLasso', icon: 'selectLasso', title: 'Select item(s): Lasso' },
+    ],
+  },
   { id: 'highlightNet', icon: 'highlightNet', title: 'Highlight Nets' },
   sep,
   { id: 'placeSymbol', icon: 'symbol', title: 'Place Symbols (A)' },
@@ -121,15 +148,20 @@ export const RIGHT_TOOLBAR: ToolEntry[] = [
   { id: 'busEntry', icon: 'busEntry', title: 'Place Wire to Bus Entries (Z)' },
   { id: 'noConnect', icon: 'noConnect', title: 'Place No Connect Flags (Q)' },
   { id: 'junction', icon: 'junction', title: 'Place Junctions (J)' },
-  { id: 'placeLabel', icon: 'labelLocal', title: 'Place Net Labels (L)' },
   {
-    id: 'placeClassLabel',
-    icon: 'labelClass',
-    title: 'Place Directive Labels',
-    disabled: true,
+    group: 'Labels',
+    actions: [
+      { id: 'placeLabel', icon: 'labelLocal', title: 'Place Net Labels (L)' },
+      {
+        id: 'placeClassLabel',
+        icon: 'labelClass',
+        title: 'Place Directive Labels',
+        disabled: true,
+      },
+      { id: 'placeGlobalLabel', icon: 'labelGlobal', title: 'Place Global Labels (Ctrl+L)' },
+      { id: 'placeHierLabel', icon: 'labelHier', title: 'Place Hierarchical Labels (H)' },
+    ],
   },
-  { id: 'placeGlobalLabel', icon: 'labelGlobal', title: 'Place Global Labels (Ctrl+L)' },
-  { id: 'placeHierLabel', icon: 'labelHier', title: 'Place Hierarchical Labels (H)' },
   { id: 'drawRuleArea', icon: 'ruleArea', title: 'Draw Rule Areas', disabled: true },
   { id: 'drawSheet', icon: 'sheet', title: 'Draw Hierarchical Sheets (S)' },
   { id: 'sheetPin', icon: 'sheetPin', title: 'Place Pins from Sheet' },
@@ -140,14 +172,29 @@ export const RIGHT_TOOLBAR: ToolEntry[] = [
     disabled: true,
   },
   sep,
-  { id: 'placeText', icon: 'text', title: 'Draw Text (T)' },
-  { id: 'textBox', icon: 'textBox', title: 'Draw Text Boxes' },
+  {
+    group: 'Text objects',
+    actions: [
+      { id: 'placeText', icon: 'text', title: 'Draw Text (T)' },
+      { id: 'textBox', icon: 'textBox', title: 'Draw Text Boxes' },
+    ],
+  },
   { id: 'table', icon: 'table', title: 'Draw Tables' },
   { id: 'rectangle', icon: 'rectangle', title: 'Draw Rectangles' },
-  { id: 'circle', icon: 'circle', title: 'Draw Circles' },
-  { id: 'ellipse', icon: 'ellipse', title: 'Draw Ellipses', disabled: true },
-  { id: 'arc', icon: 'arc', title: 'Draw Arcs' },
-  { id: 'ellipseArc', icon: 'ellipseArc', title: 'Draw Elliptical Arcs', disabled: true },
+  {
+    group: 'Circle',
+    actions: [
+      { id: 'circle', icon: 'circle', title: 'Draw Circles' },
+      { id: 'ellipse', icon: 'ellipse', title: 'Draw Ellipses', disabled: true },
+    ],
+  },
+  {
+    group: 'Arc',
+    actions: [
+      { id: 'arc', icon: 'arc', title: 'Draw Arcs' },
+      { id: 'ellipseArc', icon: 'ellipseArc', title: 'Draw Elliptical Arcs', disabled: true },
+    ],
+  },
   { id: 'bezier', icon: 'bezier', title: 'Draw Bezier Curve' },
   { id: 'lines', icon: 'lines', title: 'Draw Lines (I)' },
   { id: 'image', icon: 'image', title: 'Place Images' },
