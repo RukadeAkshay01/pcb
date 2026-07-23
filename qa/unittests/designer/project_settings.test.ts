@@ -220,8 +220,31 @@ describe('schematic setup .kicad_pro persistence', () => {
           operating_point_overlay_i_range: 'mA',
           field_names: [{ name: 'MPN', url: false, visible: true }],
         },
-        bom_presets: [{ name: 'grouped', sort_asc: true }],
-        bom_fmt_presets: [{ name: 'CSV', field_delimiter: ',' }],
+        bom_presets: [
+          {
+            name: 'grouped',
+            sort_field: 'Reference',
+            sort_asc: true,
+            filter_string: '',
+            group_symbols: true,
+            exclude_dnp: false,
+            fields_ordered: [
+              { name: 'Reference', label: 'Reference', show: true, group_by: false },
+              { name: 'Value', label: 'Value', show: true, group_by: true },
+            ],
+          },
+        ],
+        bom_fmt_presets: [
+          {
+            name: 'MyCSV',
+            field_delimiter: ',',
+            string_delimiter: '"',
+            ref_delimiter: ',',
+            ref_range_delimiter: '-',
+            keep_tabs: false,
+            keep_line_breaks: false,
+          },
+        ],
       },
       text_variables: { PROJ: 'Ziro' },
     });
@@ -247,7 +270,34 @@ describe('schematic setup .kicad_pro persistence', () => {
       allowReuse: false,
     });
     expect(s.fieldTemplates).toEqual([{ name: 'MPN', visible: true, url: false }]);
-    expect(s.bomPresets).toEqual({ presets: ['grouped'], fmtPresets: ['CSV'] });
+    // Full preset bodies parse (bom_settings.cpp from_json semantics:
+    // include_excluded_from_bom defaults false when absent).
+    expect(s.bomPresets.presets).toEqual([
+      {
+        name: 'grouped',
+        sortField: 'Reference',
+        sortAsc: true,
+        filterString: '',
+        groupSymbols: true,
+        excludeDnp: false,
+        includeExcludedFromBom: false,
+        fieldsOrdered: [
+          { name: 'Reference', label: 'Reference', show: true, groupBy: false },
+          { name: 'Value', label: 'Value', show: true, groupBy: true },
+        ],
+      },
+    ]);
+    expect(s.bomPresets.fmtPresets).toEqual([
+      {
+        name: 'MyCSV',
+        fieldDelimiter: ',',
+        stringDelimiter: '"',
+        refDelimiter: ',',
+        refRangeDelimiter: '-',
+        keepTabs: false,
+        keepLineBreaks: false,
+      },
+    ]);
     expect(s.erc.severities.label_not_connected).toBe('ignore'); // label_dangling
     expect(s.erc.severities.label_single_pin).toBe('error'); // isolated_pin_label
     expect(s.erc.severities.pin_to_pin_warning).toBe('error'); // pin_to_pin
@@ -318,19 +368,34 @@ describe('schematic setup .kicad_pro persistence', () => {
       unknown
     >[];
     expect(outClasses[0]!.diff_pair_via_gap).toBe(0.25);
-    // BOM preset bodies survive an unchanged OK (write is filter-only).
+    // Unknown per-preset keys survive an unchanged OK via the old-object
+    // merge (an entry lacking required keys is dropped, like upstream's
+    // from_json — so the fixture is complete).
     const withPresets = JSON.parse(TEMPLATE) as Record<string, unknown>;
     (withPresets.schematic as Record<string, unknown>).bom_presets = [
-      { name: 'grouped', sort_asc: true, extra: 1 },
+      {
+        name: 'grouped',
+        sort_field: 'Reference',
+        sort_asc: true,
+        filter_string: '',
+        group_symbols: true,
+        exclude_dnp: false,
+        fields_ordered: [{ name: 'Value', label: 'Value', show: true, group_by: true }],
+        extra: 1,
+      },
     ];
     const t2 = JSON.stringify(withPresets, null, 2);
     const out2 = JSON.parse(writeSchematicSetupText(t2, readSchematicSetupText(t2))!) as Record<
       string,
       unknown
     >;
-    expect((out2.schematic as Record<string, unknown>).bom_presets).toEqual([
-      { name: 'grouped', sort_asc: true, extra: 1 },
-    ]);
+    const outPresets = (out2.schematic as Record<string, unknown>).bom_presets as Record<
+      string,
+      unknown
+    >[];
+    expect(outPresets[0]!.extra).toBe(1);
+    expect(outPresets[0]!.name).toBe('grouped');
+    expect(outPresets[0]!.include_excluded_from_bom).toBe(false);
   });
 
   it('handles corrupt or missing files and malformed values', () => {

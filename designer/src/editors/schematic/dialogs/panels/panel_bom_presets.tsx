@@ -86,12 +86,12 @@ export function PanelBomPresets({ value, onChange }: Props): JSX.Element {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <PresetGrid
         title="Bill of Materials Presets"
-        names={value.presets}
+        names={value.presets.map((p) => p.name)}
         onDelete={(i) => onChange({ ...value, presets: value.presets.filter((_, j) => j !== i) })}
       />
       <PresetGrid
         title="Bill of Materials Formatting Presets"
-        names={value.fmtPresets}
+        names={value.fmtPresets.map((p) => p.name)}
         onDelete={(i) =>
           onChange({ ...value, fmtPresets: value.fmtPresets.filter((_, j) => j !== i) })
         }

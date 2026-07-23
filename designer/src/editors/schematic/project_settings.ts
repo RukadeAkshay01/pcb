@@ -28,6 +28,8 @@ import type { RawFile } from '../drawingsheet/projectSheet.js';
 import {
   LINE_STYLES,
   defaultSchematicSetup,
+  type BomFmtPreset,
+  type BomPreset,
   type FieldTemplate,
   type NetClass,
   type NetClassAssignment,
@@ -280,17 +282,51 @@ export function readSchematicSetupText(proText: string): SchematicSetup {
     s.fieldTemplates = templates;
   }
 
-  // BOM presets: the panel lists/deletes names; bodies live in the file.
-  const presetNames = (path: string): string[] => {
-    const arr = getPath(j, path);
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((p): p is Json => isObj(p))
-      .map((p) => str(p.name, ''))
-      .filter(Boolean);
-  };
-  s.bomPresets.presets = presetNames('schematic.bom_presets');
-  s.bomPresets.fmtPresets = presetNames('schematic.bom_fmt_presets');
+  // schematic.bom_presets / bom_fmt_presets (bom_settings.cpp from_json):
+  // entries missing a required key are skipped, like upstream's per-item
+  // parse; include_excluded_from_bom defaults false (absent before 8.0).
+  const bomArr = getPath(j, 'schematic.bom_presets');
+  if (Array.isArray(bomArr)) {
+    const presets: BomPreset[] = [];
+    for (const e of bomArr) {
+      if (!isObj(e) || typeof e.name !== 'string' || !Array.isArray(e.fields_ordered)) continue;
+      presets.push({
+        name: e.name,
+        fieldsOrdered: e.fields_ordered
+          .filter((f): f is Json => isObj(f))
+          .map((f) => ({
+            name: str(f.name, ''),
+            label: str(f.label, ''),
+            show: bool(f.show, false),
+            groupBy: bool(f.group_by, false),
+          })),
+        sortField: str(e.sort_field, 'Reference'),
+        sortAsc: bool(e.sort_asc, true),
+        filterString: str(e.filter_string, ''),
+        groupSymbols: bool(e.group_symbols, false),
+        excludeDnp: bool(e.exclude_dnp, false),
+        includeExcludedFromBom: bool(e.include_excluded_from_bom, false),
+      });
+    }
+    s.bomPresets.presets = presets;
+  }
+  const fmtArr = getPath(j, 'schematic.bom_fmt_presets');
+  if (Array.isArray(fmtArr)) {
+    const fmt: BomFmtPreset[] = [];
+    for (const e of fmtArr) {
+      if (!isObj(e) || typeof e.name !== 'string') continue;
+      fmt.push({
+        name: e.name,
+        fieldDelimiter: str(e.field_delimiter, ','),
+        stringDelimiter: str(e.string_delimiter, '"'),
+        refDelimiter: str(e.ref_delimiter, ','),
+        refRangeDelimiter: str(e.ref_range_delimiter, ''),
+        keepTabs: bool(e.keep_tabs, false),
+        keepLineBreaks: bool(e.keep_line_breaks, false),
+      });
+    }
+    s.bomPresets.fmtPresets = fmt;
+  }
 
   // erc.* — ERC_SETTINGS.
   const sev = getPath(j, 'erc.rule_severities');
@@ -473,20 +509,61 @@ export function writeSchematicSetupText(proText: string, s: SchematicSetup): str
     s.fieldTemplates.map((t) => ({ name: t.name, visible: t.visible, url: t.url })),
   );
 
-  // BOM presets: the panel only deletes — filter the stored preset objects to
-  // the surviving names, never regenerate their bodies.
-  const filterPresets = (path: string, kept: readonly string[]): void => {
+  // schematic.bom_presets / bom_fmt_presets (bom_settings.cpp to_json).
+  // Read-only built-ins are never persisted, like upstream; a preset whose
+  // name existed before keeps any unowned keys via the old-object merge.
+  const oldPresetByName = (path: string): Map<string, Json> => {
     const arr = getPath(j, path);
-    if (!Array.isArray(arr)) return;
-    const keep = new Set(kept);
-    setPath(
-      j as Json,
-      path,
-      arr.filter((p) => isObj(p) && keep.has(str(p.name, ''))),
-    );
+    const map = new Map<string, Json>();
+    if (Array.isArray(arr)) {
+      for (const e of arr) if (isObj(e) && typeof e.name === 'string') map.set(e.name, e);
+    }
+    return map;
   };
-  filterPresets('schematic.bom_presets', s.bomPresets.presets);
-  filterPresets('schematic.bom_fmt_presets', s.bomPresets.fmtPresets);
+  const oldBom = oldPresetByName('schematic.bom_presets');
+  setPath(
+    j,
+    'schematic.bom_presets',
+    s.bomPresets.presets
+      .filter((p) => !p.readOnly)
+      .map((p) => {
+        const out: Json = { ...(oldBom.get(p.name) ?? {}) };
+        out.name = p.name;
+        out.sort_field = p.sortField;
+        out.sort_asc = p.sortAsc;
+        out.filter_string = p.filterString;
+        out.group_symbols = p.groupSymbols;
+        out.exclude_dnp = p.excludeDnp;
+        out.include_excluded_from_bom = p.includeExcludedFromBom;
+        // Upstream only writes fields_ordered when non-empty.
+        if (p.fieldsOrdered.length > 0)
+          out.fields_ordered = p.fieldsOrdered.map((f) => ({
+            name: f.name,
+            label: f.label,
+            show: f.show,
+            group_by: f.groupBy,
+          }));
+        else delete out.fields_ordered;
+        return out;
+      }),
+  );
+  const oldFmt = oldPresetByName('schematic.bom_fmt_presets');
+  setPath(
+    j,
+    'schematic.bom_fmt_presets',
+    s.bomPresets.fmtPresets
+      .filter((p) => !p.readOnly)
+      .map((p) => ({
+        ...(oldFmt.get(p.name) ?? {}),
+        name: p.name,
+        field_delimiter: p.fieldDelimiter,
+        string_delimiter: p.stringDelimiter,
+        ref_delimiter: p.refDelimiter,
+        ref_range_delimiter: p.refRangeDelimiter,
+        keep_tabs: p.keepTabs,
+        keep_line_breaks: p.keepLineBreaks,
+      })),
+  );
 
   // erc.rule_severities: overwrite our keys, keep unknown rules untouched.
   const oldSev = getPath(j, 'erc.rule_severities');

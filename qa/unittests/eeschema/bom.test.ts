@@ -7,7 +7,13 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '@ziroeda/sexpr/src/index.js';
 import { readSchematic } from '@ziroeda/eeschema';
-import { buildBom, bomToCsv, compareRefs } from '@ziroeda/eeschema/src/exporters/bom.js';
+import {
+  buildBom,
+  bomToCsv,
+  bomToDelimited,
+  compareRefs,
+  refsShorthand,
+} from '@ziroeda/eeschema/src/exporters/bom.js';
 
 const sym = (
   ref: string,
@@ -69,5 +75,53 @@ describe('BOM export', () => {
 
   it('compareRefs orders prefixes then numbers', () => {
     expect(['R10', 'C2', 'R2', 'C10'].sort(compareRefs)).toEqual(['C2', 'C10', 'R2', 'R10']);
+  });
+});
+
+// FIELDS_EDITOR_GRID_DATA_MODEL::Export + SCH_REFERENCE_LIST::Shorthand.
+describe('BOM output formats (BOM_FMT_PRESET)', () => {
+  it('collapses reference runs only with a range delimiter', () => {
+    expect(refsShorthand(['R1', 'R2', 'R3', 'R5'], ',', '-')).toBe('R1-R3,R5');
+    expect(refsShorthand(['R1', 'R2', 'R3', 'R5'], ',', '')).toBe('R1,R2,R3,R5');
+    // A run of exactly two always lists both, like upstream.
+    expect(refsShorthand(['C1', 'C2'], ',', '-')).toBe('C1,C2');
+  });
+
+  it('wraps every field in the string delimiter and doubles occurrences', () => {
+    const rows = [{ refs: 'R1,R2', qty: 2, fields: { Value: '4k7 "precision"' }, dnp: false }];
+    const out = bomToDelimited(
+      rows,
+      [
+        { name: 'Reference', label: 'Reference' },
+        { name: 'Value', label: 'Value' },
+        { name: '${QUANTITY}', label: 'Qty' },
+      ],
+      {
+        fieldDelimiter: ',',
+        stringDelimiter: '"',
+        refDelimiter: ',',
+        refRangeDelimiter: '',
+        keepTabs: false,
+        keepLineBreaks: false,
+      },
+    );
+    expect(out).toBe('"Reference","Value","Qty"\n"R1,R2","4k7 ""precision""","2"\n');
+  });
+
+  it('strips tabs and line breaks unless kept', () => {
+    const rows = [{ refs: 'U1', qty: 1, fields: { Value: 'a\tb\nc' }, dnp: false }];
+    const cols = [{ name: 'Value', label: 'Value' }];
+    const base = {
+      fieldDelimiter: ',',
+      stringDelimiter: '',
+      refDelimiter: ',',
+      refRangeDelimiter: '',
+    };
+    expect(bomToDelimited(rows, cols, { ...base, keepTabs: false, keepLineBreaks: false })).toBe(
+      'Value\nabc\n',
+    );
+    expect(bomToDelimited(rows, cols, { ...base, keepTabs: true, keepLineBreaks: true })).toBe(
+      'Value\na\tb\nc\n',
+    );
   });
 });

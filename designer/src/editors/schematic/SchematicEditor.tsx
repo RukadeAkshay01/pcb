@@ -3004,6 +3004,10 @@ export function SchematicEditor({
             <DialogExportBom
               docs={[...liveDocs().values()]}
               baseName={outputBaseName()}
+              presets={setup.bomPresets}
+              // Saved presets persist into schematic.bom_presets and list in
+              // Schematic Setup > BOM Presets, like upstream.
+              onSavePresets={(bomPresets) => commitSetup({ ...setup, bomPresets })}
               onClose={() => setBomOpen(false)}
             />
           )}
