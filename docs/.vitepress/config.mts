@@ -15,22 +15,12 @@ export default defineConfig({
   appearance: "dark", // brand is dark-first; toggle still available
 
   head: [
-    ["link", { rel: "preconnect", href: "https://fonts.googleapis.com" }],
-    [
-      "link",
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "" },
-    ],
-    [
-      "link",
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap",
-      },
-    ],
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/logo.svg" }],
     ["meta", { name: "theme-color", content: "#08080a" }],
   ],
 
   themeConfig: {
+    logo: "/logo.svg",
     siteTitle: "Ziro Designer",
 
     nav: [
