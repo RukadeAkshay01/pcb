@@ -131,6 +131,7 @@ import {
 import { findProjectPro, readSchematicSetup, writeSchematicSetupText } from './project_settings.js';
 import {
   IU_PER_MILS,
+  hopOverArcRadiusIU,
   junctionDotDiameterIU,
   resolveEffectiveNetClass,
   subpartSettings,
@@ -1059,6 +1060,8 @@ export function SchematicEditor({
       overbarHeightRatio: setup.formatting.overbarOffsetRatio,
       // 0 mils is meaningful: KiCad's per-pin text-size fallback.
       pinSymbolSizeIU: setup.formatting.pinSymbolSizeMils * IU_PER_MILS,
+      // Wire hop-over arc radius (default line width × GetHopOverScale).
+      hopOverRadiusIU: hopOverArcRadiusIU(setup),
       // Multi-unit reference notation (SCHEMATIC_SETTINGS::SubReference).
       subpart: subpartSettings(setup.annotation),
     }),
