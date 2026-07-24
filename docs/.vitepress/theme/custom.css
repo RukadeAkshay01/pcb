@@ -154,44 +154,62 @@ h1.name,
   font-weight: 400 !important;
 }
 
-/* ---- Sidebar: EasyEDA density + brand chrome ---- */
+/* ---- Sidebar: EasyEDA-style tree, ziroeda brand ---- */
+/* A distinct panel: elevated background + a divider from the content. */
+.dark {
+  --vp-sidebar-bg-color: #0c0c0f;
+}
 .VPSidebar {
-  padding-top: 12px;
+  padding-top: 16px;
+  border-right: 1px solid var(--vp-c-divider);
 }
-/* Section group titles: mono, uppercase, letter-spaced, dim */
-.VPSidebarItem.level-0 > .item > .text,
-.VPSidebarItem.level-0 > .item .VPSidebarItem\.text {
-  font-family: var(--vp-font-family-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 11px;
-  font-weight: 500;
+
+/* Collapsible group titles: readable (normal case), Space Grotesk, with an
+   always-visible chevron — like EasyEDA's "Introduction / Schematic Capture". */
+.VPSidebarItem.level-0 > .item {
+  padding: 4px 0;
+}
+.VPSidebarItem.level-0 > .item > .text {
+  font-family: var(--zx-font-head);
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+.VPSidebarItem.level-0 .caret {
   color: var(--vp-c-text-3);
 }
-.dark .VPSidebarItem.level-0 > .item .text {
-  color: var(--vp-c-text-3);
+
+/* Leaf links: comfortable, indented, mono for the brand's technical feel. */
+.VPSidebarItem.level-1 .link,
+.VPSidebarItem.level-2 .link {
+  padding: 1px 0;
 }
-/* Leaf links: mono, comfortable */
 .VPSidebarItem.level-1 .link .text,
 .VPSidebarItem.level-2 .link .text {
   font-family: var(--vp-font-family-mono);
-  font-size: 13px;
-  letter-spacing: -0.01em;
+  font-size: 12.5px;
+  line-height: 1.5;
+  letter-spacing: -0.02em;
   color: var(--vp-c-text-2);
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: block;
+  transition: background-color 0.15s, color 0.15s;
 }
 .VPSidebarItem .link:hover .text {
   color: var(--vp-c-text-1);
+  background-color: rgba(255, 255, 255, 0.04);
 }
-/* Active leaf: gold text + a gold rail on the left, EasyEDA-style */
+
+/* Active leaf: a FILLED rounded highlight block + gold text (EasyEDA pattern,
+   done in gold instead of blue). */
 .VPSidebarItem.is-active > .item .link .text,
-.dark .VPSidebarItem.is-active > .item .text {
+.dark .VPSidebarItem.is-active > .item .link .text {
   color: var(--vp-c-brand-1);
-}
-.VPSidebarItem.level-1.is-active > .item,
-.VPSidebarItem.level-2.is-active > .item {
-  border-left: 2px solid var(--zx-gold);
-  margin-left: -14px;
-  padding-left: 12px;
+  background-color: var(--zx-accent-dim);
+  font-weight: 500;
 }
 
 /* ---- Content chrome ---- */

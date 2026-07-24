@@ -43,7 +43,7 @@ export default defineConfig({
       },
       {
         text: "Schematic Capture",
-        collapsed: false,
+        collapsed: true,
         items: [
           { text: "Overview", link: "/schematic/" },
           { text: "Drawing a Schematic", link: "/schematic/drawing" },
@@ -52,7 +52,7 @@ export default defineConfig({
       },
       {
         text: "PCB Layout",
-        collapsed: false,
+        collapsed: true,
         items: [
           { text: "Overview", link: "/pcb/" },
           { text: "Placing Footprints", link: "/pcb/placement" },
@@ -61,7 +61,7 @@ export default defineConfig({
       },
       {
         text: "Tools",
-        collapsed: false,
+        collapsed: true,
         items: [
           { text: "Gerber Viewer", link: "/tools/gerber-viewer" },
           { text: "Calculators", link: "/tools/calculators" },
