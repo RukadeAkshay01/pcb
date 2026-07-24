@@ -108,16 +108,20 @@ const stacked = (a: PinNode, b: PinNode): boolean =>
 
 /** Run the electrical rules check on a single sheet. `connectionGridIU` is
  *  SCHEMATIC_SETTINGS::m_ConnectionGridSize for the off-grid endpoint test
- *  (0/absent disables it, as a degenerate grid would flag everything). */
+ *  (0/absent disables it, as a degenerate grid would flag everything);
+ *  `busAliases` feeds bus-label expansion in the netlist. */
 export function runErc(
   sch: Schematic,
   libById: Map<string, LibSymbol>,
   settings: ErcSettings = defaultErcSettings(),
-  opts: { connectionGridIU?: number } = {},
+  opts: {
+    connectionGridIU?: number;
+    busAliases?: ReadonlyMap<string, readonly string[]>;
+  } = {},
 ): ErcViolation[] {
   g_settings = settings;
   const out: ErcViolation[] = [];
-  const netlist = computeNetlist(sch, libById);
+  const netlist = computeNetlist(sch, libById, { busAliases: opts.busAliases });
   const pins = enumeratePins(sch, libById);
   const pinById = new Map(pins.map((p) => [p.id, p]));
 

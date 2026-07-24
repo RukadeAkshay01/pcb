@@ -23,13 +23,21 @@
  *    unnamed net gets an auto name Net-(REF-PIN), and a power pin's name is the
  *    power symbol's value (GND, +5V, …).
  *
- * Scope: single-sheet wire connectivity (no buses/hierarchy yet), enough to tell
- * what is electrically joined and to highlight a net.
+ *  - Buses: bus lines form their own subgraphs (they never join wires
+ *    directly), named by the bus label they carry; a wire-to-bus entry's
+ *    bus-side end attaches it to the bus while its wire-side end joins the
+ *    ordinary wire graph. Wire nets whose resolved name is a member of the
+ *    bus (vector/group expansion incl. bus aliases) connect *across* it —
+ *    two entries labelled D0 on the same D[0..7] bus join into one net.
+ *
+ * Scope: single-sheet connectivity (no hierarchy yet), enough to tell what is
+ * electrically joined and to highlight a net.
  */
 
 import type { Schematic, SchSymbol, LibSymbol, Vec2 } from '../types.js';
 import { symbolTransform, localToWorld } from '@ziroeda/common/src/transform.js';
 import { refId } from '../tools/hittest.js';
+import { expandBusLabel, isBusLabel } from './bus.js';
 
 /** KiCad CONNECTION_SUBGRAPH::PRIORITY (higher wins when naming a net). */
 enum Priority {
@@ -66,10 +74,28 @@ export interface Net {
   items: string[];
 }
 
+/** A bus subgraph: the bus lines/entries it spans and its expanded members. */
+export interface BusNet {
+  /** The bus label naming this subgraph ('' when unlabelled). */
+  name: string;
+  /** Bus line, bus-label and entry refIds on this bus. */
+  items: string[];
+  /** Expanded member net names (empty when unlabelled/unparsable). */
+  members: string[];
+}
+
 export interface Netlist {
   nets: Net[];
   /** Node id -> net code. */
   netByItem: Map<string, number>;
+  /** Bus subgraphs (buses are not electrical nets themselves). */
+  buses: BusNet[];
+}
+
+export interface NetlistOptions {
+  /** Bus alias definitions (Schematic Setup > Bus Alias Definitions):
+   *  alias name -> member tokens, used when expanding group-bus labels. */
+  busAliases?: ReadonlyMap<string, readonly string[]>;
 }
 
 const key = (p: Vec2): string => `${p.x},${p.y}`;
@@ -169,24 +195,37 @@ class UnionFind {
 }
 
 /** Compute the single-sheet netlist for a schematic. */
-export function computeNetlist(sch: Schematic, libById: Map<string, LibSymbol>): Netlist {
+export function computeNetlist(
+  sch: Schematic,
+  libById: Map<string, LibSymbol>,
+  opts: NetlistOptions = {},
+): Netlist {
   const nodes: Node[] = [];
   const wireNodes: { id: string; a: Vec2; b: Vec2 }[] = [];
+  const busNodes: { id: string; a: Vec2; b: Vec2 }[] = [];
 
   // Wires (only nets, not buses) contribute their two endpoints as one item.
   sch.lines.forEach((line, i) => {
-    if (line.kind !== 'wire') return;
     const id = refId('line', line.uuid, i);
+    if (line.kind === 'bus') {
+      busNodes.push({ id, a: line.start, b: line.end });
+      return;
+    }
+    if (line.kind !== 'wire') return;
     nodes.push({ id, points: [line.start, line.end], driver: null });
     wireNodes.push({ id, a: line.start, b: line.end });
   });
+
+  const onAnyBus = (p: Vec2): boolean => busNodes.some((b) => onSegment(p, b.a, b.b));
 
   // Junctions.
   sch.junctions.forEach((j, i) => {
     nodes.push({ id: refId('junction', j.uuid, i), points: [j.at], driver: null });
   });
 
-  // Labels: priority/name by kind.
+  // Labels: priority/name by kind. A bus label (vector/group syntax) sitting
+  // on a bus names the bus subgraph instead of driving a wire net.
+  const busLabels: { id: string; at: Vec2; text: string; priority: Priority }[] = [];
   sch.labels.forEach((l, i) => {
     if (l.kind === 'text') return; // free text is not a net driver
     const priority =
@@ -195,11 +234,33 @@ export function computeNetlist(sch: Schematic, libById: Map<string, LibSymbol>):
         : l.kind === 'hierarchical_label'
           ? Priority.HierLabel
           : Priority.LocalLabel;
+    if (isBusLabel(l.text) && onAnyBus(l.at)) {
+      busLabels.push({ id: refId('label', l.uuid, i), at: l.at, text: l.text, priority });
+      return;
+    }
     nodes.push({
       id: refId('label', l.uuid, i),
       points: [l.at],
       driver: { priority, name: l.text },
     });
+  });
+
+  // Wire-to-bus entries: the bus-side end (on a bus segment) attaches the
+  // entry to that bus; the wire-side end joins the ordinary wire graph, so
+  // the entry carries its wire's net (SCH_BUS_WIRE_ENTRY connection points).
+  const entryBusEnd: { id: string; at: Vec2 }[] = [];
+  sch.busEntries.forEach((e, i) => {
+    const id = refId('busentry', e.uuid, i);
+    const p1 = e.at;
+    const p2 = { x: e.at.x + e.size.x, y: e.at.y + e.size.y };
+    const p1Bus = onAnyBus(p1);
+    const p2Bus = onAnyBus(p2);
+    const wireEnds: Vec2[] = [];
+    if (p1Bus) entryBusEnd.push({ id, at: p1 });
+    else wireEnds.push(p1);
+    if (p2Bus) entryBusEnd.push({ id, at: p2 });
+    else wireEnds.push(p2);
+    nodes.push({ id, points: wireEnds, driver: null });
   });
 
   // Hierarchical sheet pins connect like labels at their point (KiCad driver
@@ -279,6 +340,102 @@ export function computeNetlist(sch: Schematic, libById: Map<string, LibSymbol>):
     for (let i = 1; i < arr.length; i++) uf.union(arr[0]!, arr[i]!);
   }
 
+  // ----- Bus subgraphs (separate union-find: buses never join wires) -------
+  const busUf = new UnionFind();
+  const busPointMap = new Map<string, Set<string>>();
+  const addBus = (p: Vec2, id: string): void => {
+    const kk = key(p);
+    let s = busPointMap.get(kk);
+    if (!s) {
+      s = new Set();
+      busPointMap.set(kk, s);
+    }
+    s.add(id);
+  };
+  for (const b of busNodes) {
+    busUf.find(b.id);
+    addBus(b.a, b.id);
+    addBus(b.b, b.id);
+  }
+  // Junctions tie buses crossing through them, like wires.
+  sch.junctions.forEach((j) => {
+    for (const b of busNodes) if (onSegment(j.at, b.a, b.b)) addBus(j.at, b.id);
+  });
+  for (const ids of busPointMap.values()) {
+    const arr = [...ids];
+    for (let i = 1; i < arr.length; i++) busUf.union(arr[0]!, arr[i]!);
+  }
+  // A bus label names the subgraph of the bus segment it sits on; an entry's
+  // bus-side end attaches it to that subgraph.
+  const busRootOfPoint = (p: Vec2): string | null => {
+    for (const b of busNodes) if (onSegment(p, b.a, b.b)) return busUf.find(b.id);
+    return null;
+  };
+  const busInfo = new Map<
+    string,
+    { label: { text: string; priority: Priority } | null; labelIds: string[]; entryIds: string[] }
+  >();
+  const infoFor = (root: string): NonNullable<ReturnType<typeof busInfo.get>> => {
+    let inf = busInfo.get(root);
+    if (!inf) {
+      inf = { label: null, labelIds: [], entryIds: [] };
+      busInfo.set(root, inf);
+    }
+    return inf;
+  };
+  for (const b of busNodes) infoFor(busUf.find(b.id));
+  for (const bl of busLabels) {
+    const root = busRootOfPoint(bl.at);
+    if (!root) continue;
+    const inf = infoFor(root);
+    inf.labelIds.push(bl.id);
+    if (!inf.label || bl.priority > inf.label.priority)
+      inf.label = { text: bl.text, priority: bl.priority };
+  }
+  const entriesByBusRoot = new Map<string, string[]>();
+  for (const e of entryBusEnd) {
+    const root = busRootOfPoint(e.at);
+    if (!root) continue;
+    infoFor(root).entryIds.push(e.id);
+    const arr = entriesByBusRoot.get(root) ?? [];
+    arr.push(e.id);
+    entriesByBusRoot.set(root, arr);
+  }
+
+  // Member resolution across each bus: wire nets attached via entries whose
+  // resolved name is one of the bus's members join into a single net
+  // (CONNECTION_GRAPH's bus neighbor propagation).
+  const provisionalName = (root: string): string | null => {
+    let best: Driver | null = null;
+    for (const n of nodes) {
+      if (uf.find(n.id) !== root) continue;
+      if (n.driver?.name && (!best || n.driver.priority > best.priority)) best = n.driver;
+    }
+    return best?.name ?? null;
+  };
+  const buses: BusNet[] = [];
+  for (const [root, inf] of busInfo) {
+    const expansion = inf.label ? expandBusLabel(inf.label.text, opts.busAliases) : null;
+    const members = expansion?.members ?? [];
+    const busItems = busNodes.filter((b) => busUf.find(b.id) === root).map((b) => b.id);
+    buses.push({
+      name: inf.label?.text ?? '',
+      items: [...busItems, ...inf.labelIds, ...inf.entryIds],
+      members,
+    });
+    if (members.length === 0) continue;
+    const memberSet = new Set(members);
+    const byMember = new Map<string, string>();
+    for (const entryId of entriesByBusRoot.get(root) ?? []) {
+      const wireRoot = uf.find(entryId);
+      const name = provisionalName(wireRoot);
+      if (!name || !memberSet.has(name)) continue;
+      const prior = byMember.get(name);
+      if (prior) uf.union(prior, wireRoot);
+      else byMember.set(name, wireRoot);
+    }
+  }
+
   // Group nodes by net root.
   const byRoot = new Map<string, Node[]>();
   for (const n of nodes) {
@@ -309,5 +466,5 @@ export function computeNetlist(sch: Schematic, libById: Map<string, LibSymbol>):
     code++;
   }
 
-  return { nets, netByItem };
+  return { nets, netByItem, buses };
 }

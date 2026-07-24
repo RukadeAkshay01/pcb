@@ -493,7 +493,19 @@ export function SchematicEditor({
   // Connectivity: compute the netlist, then brighten the net the Highlight-Net tool
   // picked (not the selection — KiCad keeps those separate). The renderer matches
   // wire/junction/pin ids against this set.
-  const netlist = useMemo(() => (doc ? computeNetlist(doc, libById) : null), [doc, libById]);
+  // Project-scoped Schematic Setup values (SCHEMATIC_SETTINGS working state);
+  // hydrated from .kicad_pro on project load, committed via commitSetup.
+  const [setup, setSetup] = useState<SchematicSetup>(defaultSchematicSetup);
+
+  // Bus Alias Definitions feed group-bus expansion in the netlist.
+  const busAliases = useMemo(
+    () => new Map(setup.busAliases.filter((a) => a.name).map((a) => [a.name, a.members])),
+    [setup.busAliases],
+  );
+  const netlist = useMemo(
+    () => (doc ? computeNetlist(doc, libById, { busAliases }) : null),
+    [doc, libById, busAliases],
+  );
   const { highlightWires, highlightName } = useMemo(() => {
     const items = new Set<string>();
     let name: string | null = null;
@@ -860,9 +872,9 @@ export function SchematicEditor({
   // Paste Special (DIALOG_PASTE_SPECIAL): pick the PASTE_MODE before pasting.
   const [pasteSpecialOpen, setPasteSpecialOpen] = useState(false);
   // Schematic Setup (DIALOG_SCHEMATIC_SETUP): project-scoped settings, incl. the
-  // ERC severities + pin-conflict map that the ERC checker reads.
+  // ERC severities + pin-conflict map that the ERC checker reads. (The setup
+  // state itself is declared above the netlist memo, which consumes it.)
   const [setupOpen, setSetupOpen] = useState(false);
-  const [setup, setSetup] = useState<SchematicSetup>(defaultSchematicSetup);
   // Generate Bill of Materials (Symbol Fields Table export) dialog.
   const [bomOpen, setBomOpen] = useState(false);
   // Export Netlist (DIALOG_EXPORT_NETLIST) dialog.
@@ -1714,11 +1726,12 @@ export function SchematicEditor({
           runErc(d, new Map(d.libSymbols.map((l) => [l.libId, l])), setup.erc, {
             // Formatting's connection grid feeds the off-grid endpoint test.
             connectionGridIU: setup.formatting.connectionGridMils * IU_PER_MILS,
+            busAliases,
           }),
         );
       return d;
     });
-  }, [setup.erc]);
+  }, [setup.erc, setup.formatting.connectionGridMils, busAliases]);
 
   // Clicking a violation centres the fault and selects the offending items.
   const locateViolation = useCallback((v: ErcViolation) => {
